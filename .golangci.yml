@@ -1,0 +1,11 @@
+version: "2"
+
+linters:
+  exclusions:
+    presets:
+      # unchecked Close, fmt.Fprint* and similar
+      - std-error-handling
+
+formatters:
+  enable:
+    - gofumpt
