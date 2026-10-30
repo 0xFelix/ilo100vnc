@@ -95,11 +95,16 @@ Other VNC clients with XVP support only get the first three.
   local pointer instead.
 - Keysym-only clients (Guacamole, most VNC viewers) are mapped as a US
   keyboard. noVNC sends layout-independent scancodes.
-- Only Raw and Zlib encodings, so large graphics modes need a lot of
+- Screen updates are sent uncompressed (Raw) or deflate-compressed (Zlib)
+  only, without Tight, ZRLE or JPEG, so large graphics modes need a lot of
   bandwidth.
 - All viewers share one iLO session. If another user (e.g. the Java applet)
   holds full control, input stays disabled.
-- No virtual media: the iLO opens the data connection back to the client.
+- No virtual media (mounting images). The iLO does not carry disk data over
+  the console connection; it opens its own TCP connection to an address the
+  client announces. That makes it cumbersome to use, e.g. the iLO would have
+  to reach the ilo100vnc host, which fails behind NAT, jump hosts or
+  firewalls.
 
 ## License
 
