@@ -48,7 +48,7 @@ type Console struct {
 	lastX    int
 	lastY    int
 	havePos  bool
-	keysDown map[uint16]int
+	keysDown map[uint16]bool
 }
 
 // NewConsole creates a console. Nothing connects until Attach.
@@ -63,7 +63,7 @@ func NewConsole(cfg Config) *Console {
 		cfg:      cfg,
 		log:      cfg.Log,
 		fb:       NewFramebuffer(),
-		keysDown: map[uint16]int{},
+		keysDown: map[uint16]bool{},
 	}
 }
 
@@ -122,8 +122,10 @@ func (c *Console) Detach() {
 	})
 }
 
-// Close stops the session and waits for it to end.
+// Close releases held keys and buttons, stops the session and waits for it
+// to end.
 func (c *Console) Close() {
+	c.ReleaseAll()
 	c.mu.Lock()
 	cancel, done := c.cancel, c.done
 	c.cancel = nil
@@ -226,16 +228,19 @@ func (c *Console) Scancode(code uint32, down bool) {
 	c.key(usage, down)
 }
 
+// key sends a press only once, like the original viewer: the iLO emulates a
+// USB keyboard, the host repeats held keys itself, and repeated presses
+// leave keys stuck. Releases are always sent.
 func (c *Console) key(usage uint16, down bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if down {
-		c.keysDown[usage]++
-	} else if c.keysDown[usage] > 0 {
-		c.keysDown[usage]--
-		if c.keysDown[usage] == 0 {
-			delete(c.keysDown, usage)
+		if c.keysDown[usage] {
+			return
 		}
+		c.keysDown[usage] = true
+	} else {
+		delete(c.keysDown, usage)
 	}
 	c.send(EncodeKey(usage, down))
 }

@@ -164,25 +164,52 @@ func TestConsoleLoginFailure(t *testing.T) {
 	}
 }
 
-// pointerMessages runs events through Console.Pointer with a session that
-// has full control and returns what was sent once want bytes arrived.
-func pointerMessages(t *testing.T, relative bool, want []byte, events ...[3]int) []byte {
+// sentMessages runs input through f with a session that has full control
+// and returns what was sent once want bytes arrived.
+func sentMessages(t *testing.T, relative bool, want []byte, f func(*Console)) []byte {
 	t.Helper()
 	a, b := net.Pipe()
 	t.Cleanup(func() { a.Close(); b.Close() })
 	c := NewConsole(Config{RelativeMouse: relative, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	c.sess = &Session{conn: a, log: c.log, ready: true} // status 0: full control
-	go func() {
-		for _, e := range events {
-			c.Pointer(uint8(e[0]), e[1], e[2])
-		}
-	}()
+	go f(c)
 	got := make([]byte, len(want))
 	_ = b.SetReadDeadline(time.Now().Add(5 * time.Second))
 	if _, err := io.ReadFull(b, got); err != nil {
 		t.Fatal(err)
 	}
 	return got
+}
+
+func pointerMessages(t *testing.T, relative bool, want []byte, events ...[3]int) []byte {
+	t.Helper()
+	return sentMessages(t, relative, want, func(c *Console) {
+		for _, e := range events {
+			c.Pointer(uint8(e[0]), e[1], e[2])
+		}
+	})
+}
+
+func TestKeyRepeat(t *testing.T) {
+	want := bytes.Join([][]byte{
+		// auto-repeated presses are sent once
+		EncodeKey(0x52, true),
+		EncodeKey(0x52, false),
+		// a release without press is still sent (clears a key stuck in the iLO)
+		EncodeKey(0x51, false),
+		EncodeKey(0x52, true),
+	}, nil)
+	got := sentMessages(t, false, want, func(c *Console) {
+		c.Scancode(0xC8, true)
+		c.Scancode(0xC8, true)
+		c.Scancode(0xC8, true)
+		c.Scancode(0xC8, false)
+		c.Scancode(0xD0, false)
+		c.Scancode(0xC8, true)
+	})
+	if !bytes.Equal(got, want) {
+		t.Fatalf("got % X\nwant % X", got, want)
+	}
 }
 
 func TestPointerAbsolute(t *testing.T) {
