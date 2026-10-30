@@ -38,19 +38,19 @@ Open `http://localhost:8080/`, or point a VNC client at `localhost:5900`.
 Here both listen on localhost only; use e.g. `-listen :8080` to serve on all
 interfaces.
 
-| Flag | Env (`ILO100VNC_`...) | Default | Meaning |
-|------|-----------------------|---------|---------|
+| Flag | Env | Default | Meaning |
+|------|-----|---------|---------|
 | `-config` | | | JSON config file (keys below) |
-| `-host` | `HOST` | | iLO host name or address |
-| `-user` | `USER` | `admin` | iLO user |
-| `-password-file` | `PASSWORD_FILE` | | file with the iLO password |
-| | `PASSWORD` | | iLO password |
-| `-listen` | `LISTEN` | `localhost:8080` | web client address, empty disables |
-| `-vnc` | `VNC` | | VNC address, empty disables |
-| | `VNC_PASSWORD` | | VNC password (max 8 chars) |
-| `-idle-timeout` | `IDLE_TIMEOUT` | `30s` | close the iLO session after the last viewer left, `0` never |
-| `-relative-mouse` | `RELATIVE_MOUSE` | false | relative mouse reports |
-| `-debug` | `DEBUG` | false | debug log with protocol hex dumps |
+| `-host` | `ILO100VNC_HOST` | | iLO host name or address |
+| `-user` | `ILO100VNC_USER` | `admin` | iLO user |
+| `-password-file` | `ILO100VNC_PASSWORD_FILE` | | file with the iLO password |
+| | `ILO100VNC_PASSWORD` | | iLO password |
+| `-listen` | `ILO100VNC_LISTEN` | `localhost:8080` | web client address, empty disables |
+| `-vnc` | `ILO100VNC_VNC` | | VNC address, empty disables |
+| | `ILO100VNC_VNC_PASSWORD` | | VNC password (max 8 chars) |
+| `-idle-timeout` | `ILO100VNC_IDLE_TIMEOUT` | `30s` | close the iLO session after the last viewer left, `0` never |
+| `-relative-mouse` | `ILO100VNC_RELATIVE_MOUSE` | false | relative mouse reports |
+| `-debug` | `ILO100VNC_DEBUG` | false | debug log with protocol hex dumps |
 
 Flags override the environment, which overrides the config file:
 
