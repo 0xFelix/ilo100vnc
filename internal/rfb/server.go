@@ -49,6 +49,7 @@ const (
 	PowerReset     PowerOp = 4    // XVP reset: hard reset
 	PowerOn        PowerOp = 0x80 // extension: power on
 	PowerBIOSSetup PowerOp = 0x81 // extension: boot into BIOS Setup
+	PowerOff       PowerOp = 0x82 // extension: hard power off
 )
 
 func (op PowerOp) String() string {
@@ -63,6 +64,8 @@ func (op PowerOp) String() string {
 		return "power-on"
 	case PowerBIOSSetup:
 		return "bios-setup"
+	case PowerOff:
+		return "power-off"
 	}
 	return fmt.Sprintf("unknown(%d)", uint8(op))
 }

@@ -284,6 +284,8 @@ func powerControl(c *ipmi.Client) func(rfb.PowerOp) error {
 			return c.Reset(ctx)
 		case rfb.PowerOn:
 			return c.PowerOn(ctx)
+		case rfb.PowerOff:
+			return c.PowerOff(ctx)
 		case rfb.PowerBIOSSetup:
 			return c.BIOSSetup(ctx)
 		}

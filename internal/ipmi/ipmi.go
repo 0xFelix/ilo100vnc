@@ -82,6 +82,11 @@ func (c *Client) PowerOn(ctx context.Context) error {
 	return c.control(ctx, chassis.ChassisControlPowerUp)
 }
 
+// PowerOff switches the host off without shutting down the OS.
+func (c *Client) PowerOff(ctx context.Context) error {
+	return c.control(ctx, chassis.ChassisControlPowerDown)
+}
+
 // BIOSSetup sets the one-time boot flag "force boot into BIOS Setup" and
 // powers the host on, or resets it if it is running.
 func (c *Client) BIOSSetup(ctx context.Context) error {

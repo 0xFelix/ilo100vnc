@@ -1,6 +1,6 @@
 // ilo100vnc additions to noVNC, loaded by vnc.html as a module. noVNC shows
-// its power panel when the server announces XVP. This adds
-// "Power on" and "BIOS Setup" (XVP codes 0x80/0x81, understood only by
+// its power panel when the server announces XVP. This adds "Power on",
+// "Power off" and "BIOS Setup" (XVP codes 0x80-0x82, understood only by
 // ilo100vnc), renames the standard buttons to what the iLO does, and asks
 // for confirmation before every power action.
 import UI from "./app/ui.js";
@@ -41,6 +41,7 @@ if (panel) {
     relabel("noVNC_reboot_button", "Power cycle");
     relabel("noVNC_reset_button", "Reset");
     addButton("Power on", 0x80);
+    addButton("Power off", 0x82);
     addButton("BIOS Setup", 0x81);
 
     // Capture phase: runs before noVNC's own button handlers.

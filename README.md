@@ -103,11 +103,12 @@ as the console:
 | Power cycle | power off and on |
 | Reset | hard reset |
 | Power on | power on |
+| Power off | hard power off, without shutting down the OS |
 | BIOS Setup | one-time boot flag "BIOS Setup", then power on, or reset if running |
 
-Every button asks for confirmation. "Power on" and "BIOS Setup" are added
-to noVNC by `internal/web/ilo.js`, which is injected into noVNC's page; the
-vendored noVNC files stay unmodified. Other VNC clients with XVP support
+Every button asks for confirmation. "Power on", "Power off" and "BIOS
+Setup" are added to noVNC by `internal/web/ilo.js`, which is injected into
+noVNC's page; the vendored noVNC files stay unmodified. Other VNC clients with XVP support
 only get the first three (as Shutdown, Reboot, Reset). Failures are only
 logged, in the `ilo100vnc` log and the browser console.
 

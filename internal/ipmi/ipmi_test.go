@@ -99,6 +99,7 @@ func TestChassisActions(t *testing.T) {
 		{c.SoftOff, "soft"},
 		{c.PowerCycle, "cycle"},
 		{c.Reset, "reset"},
+		{c.PowerOff, "off"},
 	} {
 		if err := tc.f(ctx); err != nil {
 			t.Fatalf("%s: %v", tc.want, err)
