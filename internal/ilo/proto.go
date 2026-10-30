@@ -168,26 +168,26 @@ func (bt Buttons) bytes() []byte {
 }
 
 // EncodeButtonsAbsolute is 0xB3.
-func EncodeButtonsAbsolute(x, y int16, bt Buttons) []byte {
+func EncodeButtonsAbsolute(x, y int32, bt Buttons) []byte {
 	b := []byte{msgButtonStateAtAbsolute}
-	b = le16(b, uint16(x))
-	b = le16(b, uint16(y))
+	b = le32(b, uint32(x))
+	b = le32(b, uint32(y))
 	b = append(b, 3)
 	return append(b, bt.bytes()...)
 }
 
 // EncodeButtonsRelative is 0xB4.
-func EncodeButtonsRelative(dx, dy int16, bt Buttons) []byte {
+func EncodeButtonsRelative(dx, dy int32, bt Buttons) []byte {
 	b := EncodeButtonsAbsolute(dx, dy, bt)
 	b[0] = msgButtonStateAtRelative
 	return b
 }
 
 // EncodeMouseMove is 0xB5 (absolute pixel, or delta in relative mode).
-func EncodeMouseMove(x, y int16) []byte {
+func EncodeMouseMove(x, y int32) []byte {
 	b := []byte{msgMouseMove}
-	b = le16(b, uint16(x))
-	return le16(b, uint16(y))
+	b = le32(b, uint32(x))
+	return le32(b, uint32(y))
 }
 
 // EncodeKey is 0xD1 with a USB HID usage id.

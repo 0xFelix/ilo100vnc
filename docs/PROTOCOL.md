@@ -295,9 +295,9 @@ Source: `mahogany/MessageSender`, `mahoganyprotocol/*#writeBuffer`.
 | 0x9A | StorageClientDisconnect | u8 0 |
 | 0xB1 | ClientAbsoluteMode      | bool enable |
 | 0xB2 | ClientRelativeMode      | u8: bit0 relative, bit4 hide cursor |
-| 0xB3 | ButtonStateAtAbsolute   | i16 x, i16 y, u8 n (=3), u8 button[n] |
-| 0xB4 | ButtonStateAtRelative   | i16 dx, i16 dy, u8 n (=3), u8 button[n] |
-| 0xB5 | MouseMove               | i16 x, i16 y (absolute pixel, or delta in relative mode) |
+| 0xB3 | ButtonStateAtAbsolute   | i32 x, i32 y, u8 n (=3), u8 button[n] |
+| 0xB4 | ButtonStateAtRelative   | i32 dx, i32 dy, u8 n (=3), u8 button[n] |
+| 0xB5 | MouseMove               | i32 x, i32 y (absolute pixel, or delta in relative mode) |
 | 0xC1 | RequestKeyIndicators    | u8 0 |
 | 0xD1 | KeyStateChange          | u16 usage, bool pressed, bool pretranslated (always 0) |
 | 0xD2 | ClientNOP               | u8[7] zero |
@@ -363,8 +363,11 @@ Button byte: bit0 = pressed, bits 1-7 = wheel position. Default byte is `0x80`
 Mouse moves without a button change use 0xB5. Button changes and wheel use
 0xB3 (or 0xB4 in relative mode) carrying the current position.
 
-Example, left click at (100,50): `B3 64 00 32 00 03 81 80 80`, then
-`B3 64 00 32 00 03 80 80 80`.
+Example, left click at (100,50): `B3 64 00 00 00 32 00 00 00 03 81 80 80`,
+then `B3 64 00 00 00 32 00 00 00 03 80 80 80`. The coordinates are 32-bit
+(Java `int`), unlike the 16-bit `Region` fields. The iLO has no length
+prefix, so a wrong size shifts every following message: keys then stop
+working after the first mouse movement.
 
 ## 6. Server -> client messages [code]
 

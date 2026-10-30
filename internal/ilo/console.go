@@ -250,7 +250,7 @@ func (c *Console) ReleaseAll() {
 	clear(c.keysDown)
 	if c.buttons != (Buttons{}) {
 		c.buttons = Buttons{}
-		c.send(EncodeButtonsAbsolute(int16(c.lastX), int16(c.lastY), c.buttons))
+		c.send(EncodeButtonsAbsolute(int32(c.lastX), int32(c.lastY), c.buttons))
 	}
 }
 
@@ -294,8 +294,8 @@ func (c *Console) Pointer(mask uint8, x, y int) {
 	case bt != c.buttons || wheel != 0:
 		c.buttons = bt
 		bt.Wheel = wheel
-		c.send(encode(int16(px), int16(py), bt))
+		c.send(encode(int32(px), int32(py), bt))
 	case moved:
-		c.send(EncodeMouseMove(int16(px), int16(py)))
+		c.send(EncodeMouseMove(int32(px), int32(py)))
 	}
 }
