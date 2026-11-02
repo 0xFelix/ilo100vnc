@@ -406,17 +406,14 @@ func (rd *Reader) bytes(n int) ([]byte, error) {
 	return append([]byte(nil), b...), nil
 }
 
-func (rd *Reader) region() (Region, error) {
-	b, err := rd.read(8)
+// decode reads the fixed-size, little-endian struct v points to.
+func (rd *Reader) decode(v any) error {
+	b, err := rd.read(binary.Size(v))
 	if err != nil {
-		return Region{}, err
+		return err
 	}
-	return Region{
-		X: int16(binary.LittleEndian.Uint16(b[0:])),
-		Y: int16(binary.LittleEndian.Uint16(b[2:])),
-		W: int16(binary.LittleEndian.Uint16(b[4:])),
-		H: int16(binary.LittleEndian.Uint16(b[6:])),
-	}, nil
+	_, err = binary.Decode(b, binary.LittleEndian, v)
+	return err
 }
 
 // Next reads one message. It returns one of the message types above.
@@ -504,70 +501,51 @@ func (rd *Reader) parse(id byte) (any, error) {
 		return KeyIndicators{Caps: b[0] != 0, Num: b[1] != 0, Scroll: b[2] != 0}, nil
 
 	case msgInformVesaMode:
-		b, err := rd.read(8)
-		if err != nil {
-			return nil, err
-		}
-		return VesaMode{
-			Mode:   int16(binary.LittleEndian.Uint16(b[0:])),
-			Width:  int16(binary.LittleEndian.Uint16(b[2:])),
-			Height: int16(binary.LittleEndian.Uint16(b[4:])),
-			BPP:    int16(binary.LittleEndian.Uint16(b[6:])),
-		}, nil
+		var m VesaMode
+		err := rd.decode(&m)
+		return m, err
 
 	case msgBitBlt:
-		h, err := rd.read(4)
-		if err != nil {
+		var h struct {
+			Type                  uint16
+			FontHeight, FontWidth uint8
+			Src, Dst              Region
+			Size                  uint32
+		}
+		if err := rd.decode(&h); err != nil {
 			return nil, err
 		}
-		m := BitBlt{
-			Type:       binary.LittleEndian.Uint16(h),
-			FontHeight: h[2],
-			FontWidth:  h[3],
+		if h.Size > maxBlitData {
+			return nil, fmt.Errorf("bitblt size %d", h.Size)
 		}
-		if m.Src, err = rd.region(); err != nil {
-			return nil, err
-		}
-		if m.Dst, err = rd.region(); err != nil {
-			return nil, err
-		}
-		n, err := rd.u32()
-		if err != nil {
-			return nil, err
-		}
-		if n > maxBlitData {
-			return nil, fmt.Errorf("bitblt size %d", n)
-		}
-		if m.Data, err = rd.bytes(int(n)); err != nil {
-			return nil, err
-		}
-		return m, nil
+		m := BitBlt{Type: h.Type, FontHeight: h.FontHeight, FontWidth: h.FontWidth, Src: h.Src, Dst: h.Dst}
+		var err error
+		m.Data, err = rd.bytes(int(h.Size))
+		return m, err
 
 	case msgEnhanceBitBlt:
-		h, err := rd.read(20 + snoopRows*8)
-		if err != nil {
+		var h struct {
+			Type                                   uint16
+			TileW, TileH                           uint8
+			TripletCode, RepeatCode, RawSize, Size uint32
+			Rows                                   [snoopRows]struct{ Lo, Hi uint32 }
+		}
+		if err := rd.decode(&h); err != nil {
 			return nil, err
+		}
+		if h.Size > maxBlitData {
+			return nil, fmt.Errorf("enhance bitblt size %d", h.Size)
 		}
 		m := EnhanceBitBlt{
-			Type:        binary.LittleEndian.Uint16(h),
-			TileW:       h[2],
-			TileH:       h[3],
-			TripletCode: binary.LittleEndian.Uint32(h[4:]),
-			RepeatCode:  binary.LittleEndian.Uint32(h[8:]),
-			RawSize:     binary.LittleEndian.Uint32(h[12:]),
+			Type: h.Type, TileW: h.TileW, TileH: h.TileH,
+			TripletCode: h.TripletCode, RepeatCode: h.RepeatCode, RawSize: h.RawSize,
 		}
-		n := binary.LittleEndian.Uint32(h[16:])
-		for i := range snoopRows {
-			m.Lo[i] = binary.LittleEndian.Uint32(h[20+i*8:])
-			m.Hi[i] = binary.LittleEndian.Uint32(h[24+i*8:])
+		for i, r := range h.Rows {
+			m.Lo[i], m.Hi[i] = r.Lo, r.Hi
 		}
-		if n > maxBlitData {
-			return nil, fmt.Errorf("enhance bitblt size %d", n)
-		}
-		if m.Data, err = rd.bytes(int(n)); err != nil {
-			return nil, err
-		}
-		return m, nil
+		var err error
+		m.Data, err = rd.bytes(int(h.Size))
+		return m, err
 
 	case msgStandbyPower:
 		if _, err := rd.read(15); err != nil {
@@ -602,11 +580,10 @@ func (rd *Reader) parse(id byte) (any, error) {
 		return m, nil
 
 	case msgSetTextCursor:
-		b, err := rd.read(4)
-		if err != nil {
+		var c TextCursor
+		if err := rd.decode(&c); err != nil {
 			return nil, err
 		}
-		c := TextCursor{Col: b[0], Row: b[1], Start: b[2], Stop: b[3]}
 		if c.Stop < c.Start {
 			c.Start, c.Stop = c.Stop, c.Start
 		}

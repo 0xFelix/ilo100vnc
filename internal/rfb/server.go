@@ -201,44 +201,19 @@ func (s *Server) ServeConn(conn net.Conn) {
 	}
 }
 
-// PixelFormat is the RFB PIXEL_FORMAT structure.
+// PixelFormat is the RFB PIXEL_FORMAT structure, in wire layout.
 type PixelFormat struct {
 	BPP, Depth                      uint8
 	BigEndian, TrueColor            bool
 	RedMax, GreenMax, BlueMax       uint16
 	RedShift, GreenShift, BlueShift uint8
+	_                               [3]byte
 }
 
 var defaultPixelFormat = PixelFormat{
 	BPP: 32, Depth: 24, TrueColor: true,
 	RedMax: 255, GreenMax: 255, BlueMax: 255,
 	RedShift: 16, GreenShift: 8, BlueShift: 0,
-}
-
-func (pf PixelFormat) marshal() []byte {
-	b := make([]byte, 16)
-	b[0], b[1] = pf.BPP, pf.Depth
-	if pf.BigEndian {
-		b[2] = 1
-	}
-	if pf.TrueColor {
-		b[3] = 1
-	}
-	binary.BigEndian.PutUint16(b[4:], pf.RedMax)
-	binary.BigEndian.PutUint16(b[6:], pf.GreenMax)
-	binary.BigEndian.PutUint16(b[8:], pf.BlueMax)
-	b[10], b[11], b[12] = pf.RedShift, pf.GreenShift, pf.BlueShift
-	return b
-}
-
-func unmarshalPixelFormat(b []byte) PixelFormat {
-	return PixelFormat{
-		BPP: b[0], Depth: b[1], BigEndian: b[2] != 0, TrueColor: b[3] != 0,
-		RedMax:   binary.BigEndian.Uint16(b[4:]),
-		GreenMax: binary.BigEndian.Uint16(b[6:]),
-		BlueMax:  binary.BigEndian.Uint16(b[8:]),
-		RedShift: b[10], GreenShift: b[11], BlueShift: b[12],
-	}
 }
 
 func (pf PixelFormat) bytesPerPixel() int { return int(pf.BPP) / 8 }
@@ -394,7 +369,7 @@ func (c *client) handshake() error {
 	c.w0, c.h0 = w, h
 	b := binary.BigEndian.AppendUint16(nil, uint16(w))
 	b = binary.BigEndian.AppendUint16(b, uint16(h))
-	b = append(b, c.pf.marshal()...)
+	b, _ = binary.Append(b, binary.BigEndian, c.pf)
 	b = binary.BigEndian.AppendUint32(b, uint32(len(c.srv.opts.Name)))
 	b = append(b, c.srv.opts.Name...)
 	_, err := c.conn.Write(b)
@@ -458,7 +433,10 @@ func (c *client) reader() error {
 			if err != nil {
 				return err
 			}
-			pf := unmarshalPixelFormat(b[3:])
+			var pf PixelFormat
+			if _, err := binary.Decode(b[3:], binary.BigEndian, &pf); err != nil {
+				return err
+			}
 			if !pf.TrueColor || (pf.BPP != 8 && pf.BPP != 16 && pf.BPP != 32) {
 				return fmt.Errorf("unsupported pixel format %+v", pf)
 			}
