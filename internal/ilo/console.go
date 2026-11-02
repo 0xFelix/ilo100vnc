@@ -41,7 +41,9 @@ type Console struct {
 	done     chan struct{}
 	idle     *time.Timer
 	sess     *Session
+	up       chan struct{} // closed while a session is ready
 	onUpdate func(image.Rectangle)
+	onDown   func()
 
 	// input state, guarded by mu
 	buttons  Buttons
@@ -63,6 +65,7 @@ func NewConsole(cfg Config) *Console {
 		cfg:      cfg,
 		log:      cfg.Log,
 		fb:       NewFramebuffer(),
+		up:       make(chan struct{}),
 		keysDown: map[uint16]bool{},
 	}
 }
@@ -76,6 +79,48 @@ func (c *Console) OnUpdate(fn func(image.Rectangle)) {
 	c.mu.Lock()
 	c.onUpdate = fn
 	c.mu.Unlock()
+}
+
+// OnDown registers the function called when a ready session ends.
+func (c *Console) OnDown(fn func()) {
+	c.mu.Lock()
+	c.onDown = fn
+	c.mu.Unlock()
+}
+
+// Ready returns a channel that is closed while a session is ready
+// (handshake done). Once that session ends, a new channel is returned.
+func (c *Console) Ready() <-chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.up
+}
+
+func (c *Console) markReady() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	select {
+	case <-c.up:
+	default:
+		close(c.up)
+	}
+}
+
+// markDown resets the ready state after a session ended and calls OnDown
+// if the session was ready.
+func (c *Console) markDown() {
+	c.mu.Lock()
+	var fn func()
+	select {
+	case <-c.up:
+		c.up = make(chan struct{})
+		fn = c.onDown
+	default:
+	}
+	c.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
 }
 
 func (c *Console) notify(dirty image.Rectangle) {
@@ -178,6 +223,7 @@ func (c *Console) session(ctx context.Context) error {
 		Relative: c.cfg.RelativeMouse,
 		Log:      c.log,
 		OnUpdate: c.notify,
+		OnReady:  c.markReady,
 	})
 	if err != nil {
 		return err
@@ -193,6 +239,7 @@ func (c *Console) session(ctx context.Context) error {
 		}
 		c.mu.Unlock()
 		_ = s.Close()
+		c.markDown()
 	}()
 	user := p.Username
 	if user == "" {

@@ -100,6 +100,9 @@ Other VNC clients with XVP support only get the first three.
   bandwidth.
 - All viewers share one iLO session. If another user (e.g. the Java applet)
   holds full control, input stays disabled.
+- noVNC shows "Connecting..." until the iLO session is up and reconnects
+  when it drops. Native VNC clients connect right away and see a black
+  screen meanwhile.
 - No virtual media (mounting images). The iLO does not carry disk data over
   the console connection; it opens its own TCP connection to an address the
   client announces. That makes it cumbersome to use, e.g. the iLO would have

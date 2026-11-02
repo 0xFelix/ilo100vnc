@@ -124,6 +124,11 @@ func TestConsoleEndToEnd(t *testing.T) {
 	c.OnUpdate(func(u image.Rectangle) { updates <- u })
 	c.Attach()
 	defer c.Close()
+	select {
+	case <-c.Ready():
+	case <-time.After(5 * time.Second):
+		t.Fatal("session not ready")
+	}
 
 	deadline := time.After(5 * time.Second)
 	for {
@@ -179,6 +184,39 @@ func TestConsoleWaitsForPreviousSession(t *testing.T) {
 	case <-logins:
 	case <-time.After(5 * time.Second):
 		t.Fatal("no login after the previous session ended")
+	}
+}
+
+func TestConsoleReadyAndDown(t *testing.T) {
+	c := NewConsole(Config{Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	var downs atomic.Int32
+	c.OnDown(func() { downs.Add(1) })
+	ready := func() bool {
+		select {
+		case <-c.Ready():
+			return true
+		default:
+			return false
+		}
+	}
+	if ready() {
+		t.Fatal("ready before a session")
+	}
+	c.markDown() // a session that never got ready
+	if downs.Load() != 0 {
+		t.Fatal("OnDown without a ready session")
+	}
+	c.markReady()
+	c.markReady()
+	if !ready() {
+		t.Fatal("not ready")
+	}
+	c.markDown()
+	if downs.Load() != 1 {
+		t.Fatalf("OnDown called %d times", downs.Load())
+	}
+	if ready() {
+		t.Fatal("ready after down")
 	}
 }
 

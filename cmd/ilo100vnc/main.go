@@ -79,17 +79,19 @@ func run() error {
 
 	console := ilo.NewConsole(iloCfg)
 	srv := rfb.NewServer(rfb.Options{
-		Display:  console.Framebuffer(),
-		Input:    console,
-		Name:     "iLO 100 " + iloCfg.URL.Host,
-		Password: cfg.VNCPassword,
-		Log:      log,
-		OnAttach: console.Attach,
-		OnDetach: console.Detach,
-		Power:    powerControl(ipmi.New(iloCfg.URL.Hostname(), ipmi.Port, iloCfg.User, iloCfg.Password, log)),
+		Display:   console.Framebuffer(),
+		Input:     console,
+		Name:      "iLO 100 " + iloCfg.URL.Host,
+		Password:  cfg.VNCPassword,
+		Log:       log,
+		OnAttach:  console.Attach,
+		OnDetach:  console.Detach,
+		Power:     powerControl(ipmi.New(iloCfg.URL.Hostname(), ipmi.Port, iloCfg.User, iloCfg.Password, log)),
+		Available: console.Ready,
 	})
 	// the RFB server notices size changes itself when it sends the damage
 	console.OnUpdate(srv.Damage)
+	console.OnDown(srv.Unavailable)
 	if cfg.VNCPassword == "" {
 		for _, a := range []string{cfg.Listen, cfg.VNC} {
 			if a != "" && !isLoopback(a) {
@@ -106,8 +108,10 @@ func run() error {
 	var httpSrv *http.Server
 	if cfg.Listen != "" {
 		httpSrv = &http.Server{
-			Addr:              cfg.Listen,
-			Handler:           web.Handler(srv.ServeConn, log),
+			Addr: cfg.Listen,
+			// noVNC shows "Connecting..." while there is no iLO session
+			// and reconnects by itself; native VNC clients often do not
+			Handler:           web.Handler(srv.ServeConnWhenAvailable, log),
 			ReadHeaderTimeout: 10 * time.Second,
 		}
 		go func() {

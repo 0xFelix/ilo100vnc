@@ -37,6 +37,7 @@ type Session struct {
 	ready     bool
 	relative  bool
 	onUpdate  func(image.Rectangle)
+	onReady   func()
 	mode      VesaMode
 	stats     *videoStats // debug only
 	requested bool        // full control requested, awaiting the answer
@@ -48,6 +49,7 @@ type SessionOptions struct {
 	Relative bool         // relative instead of absolute mouse
 	Log      *slog.Logger // at debug level, also hex dumps all traffic
 	OnUpdate func(image.Rectangle)
+	OnReady  func() // called once the handshake has completed
 }
 
 // ErrKVMSSL is returned for an encrypted KVM session (sessiontype kvmssl).
@@ -72,6 +74,7 @@ func Dial(ctx context.Context, p Params, fb *Framebuffer, o SessionOptions) (*Se
 		fb:       fb,
 		relative: o.Relative,
 		onUpdate: o.OnUpdate,
+		onReady:  o.OnReady,
 	}
 	if s.log == nil {
 		s.log = slog.Default()
@@ -313,6 +316,9 @@ func (s *Session) onMultiUserState(m MultiUserState) error {
 		if err := s.Send(b); err != nil {
 			return err
 		}
+	}
+	if first && s.onReady != nil {
+		s.onReady()
 	}
 	return nil
 }

@@ -6,9 +6,13 @@ import (
 	"compress/zlib"
 	"crypto/des"
 	"encoding/binary"
+	"errors"
 	"image"
 	"io"
+	"log/slog"
 	"net"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -99,6 +103,13 @@ func startServer(t *testing.T, o Options) (*Server, *viewer, func()) {
 // init38 performs a 3.8 handshake with security None and returns w, h.
 func (v *viewer) init38() (int, int) {
 	v.t.Helper()
+	v.auth38()
+	return v.serverInit()
+}
+
+// auth38 performs a 3.8 handshake with security None up to ClientInit.
+func (v *viewer) auth38() {
+	v.t.Helper()
 	if got := string(v.read(12)); got != "RFB 003.008\n" {
 		v.t.Fatalf("version %q", got)
 	}
@@ -111,6 +122,11 @@ func (v *viewer) init38() (int, int) {
 		v.t.Fatalf("security result %d", res)
 	}
 	v.write(1) // shared
+}
+
+// serverInit reads ServerInit and returns w, h.
+func (v *viewer) serverInit() (int, int) {
+	v.t.Helper()
 	w, h := v.u16(), v.u16()
 	pf := v.read(16)
 	if pf[0] != 32 || pf[3] != 1 {
@@ -402,5 +418,112 @@ func TestXVPWithoutPower(t *testing.T) {
 	v.write(250, 0, 1, byte(PowerShutdown))
 	if got := v.read(4); !bytes.Equal(got, []byte{250, 0, 1, xvpFail}) {
 		t.Fatalf("XVP_FAIL % X", got)
+	}
+}
+
+// syncBuffer is a bytes.Buffer safe for concurrent use.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.String()
+}
+
+func TestServeWhenAvailable(t *testing.T) {
+	avail := make(chan struct{})
+	var logs syncBuffer
+	srv := NewServer(Options{
+		Display: newFakeDisplay(2, 2), Name: "test",
+		Log:       slog.New(slog.NewTextHandler(&logs, nil)),
+		Available: func() <-chan struct{} { return avail },
+	})
+	a, b := net.Pipe()
+	defer b.Close()
+	go srv.ServeConnWhenAvailable(a)
+	v := &viewer{t: t, conn: b, r: bufio.NewReader(b)}
+	_ = b.SetDeadline(time.Now().Add(5 * time.Second))
+	v.auth38()
+
+	// no ServerInit while the display is unavailable
+	_ = b.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	if _, err := v.r.ReadByte(); !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("read before available: %v", err)
+	}
+	_ = b.SetDeadline(time.Now().Add(5 * time.Second))
+	close(avail)
+	if w, h := v.serverInit(); w != 2 || h != 2 {
+		t.Fatalf("size %dx%d", w, h)
+	}
+
+	// wait until the viewer is registered, then drop it
+	for {
+		srv.mu.Lock()
+		n := len(srv.clients)
+		srv.mu.Unlock()
+		if n == 1 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	srv.Unavailable()
+	if _, err := v.r.ReadByte(); !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("read after Unavailable: %v", err)
+	}
+	const want = `msg="viewer disconnected" viewer=pipe reason="display unavailable"`
+	for deadline := time.Now().Add(5 * time.Second); !strings.Contains(logs.String(), want); {
+		if time.Now().After(deadline) {
+			t.Fatalf("no %q in log:\n%s", want, logs.String())
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestServeWhenAvailableGivesUp(t *testing.T) {
+	defer func(d time.Duration) { availableTimeout = d }(availableTimeout)
+	availableTimeout = 50 * time.Millisecond
+	never := make(chan struct{})
+	srv := NewServer(Options{
+		Display: newFakeDisplay(2, 2), Name: "test",
+		Available: func() <-chan struct{} { return never },
+	})
+	a, b := net.Pipe()
+	defer b.Close()
+	go srv.ServeConnWhenAvailable(a)
+	v := &viewer{t: t, conn: b, r: bufio.NewReader(b)}
+	_ = b.SetDeadline(time.Now().Add(5 * time.Second))
+	v.auth38()
+	if _, err := v.r.ReadByte(); !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("read: %v", err)
+	}
+}
+
+func TestServeWhenAvailableViewerLeaves(t *testing.T) {
+	never := make(chan struct{})
+	detached := make(chan struct{})
+	srv := NewServer(Options{
+		Display: newFakeDisplay(2, 2), Name: "test",
+		Available: func() <-chan struct{} { return never },
+		OnDetach:  func() { close(detached) },
+	})
+	a, b := net.Pipe()
+	go srv.ServeConnWhenAvailable(a)
+	v := &viewer{t: t, conn: b, r: bufio.NewReader(b)}
+	_ = b.SetDeadline(time.Now().Add(5 * time.Second))
+	v.auth38()
+	b.Close()
+	select {
+	case <-detached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("viewer that left while waiting is still attached")
 	}
 }

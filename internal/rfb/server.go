@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -82,7 +83,16 @@ type Options struct {
 	// Power, if set, is announced to viewers through the XVP extension and
 	// runs their power operations. A returned error is reported as XVP_FAIL.
 	Power func(PowerOp) error
+	// Available, if set, returns a channel that is closed while the
+	// display is available. Used by ServeConnWhenAvailable.
+	Available func() <-chan struct{}
 }
+
+const handshakeTimeout = 30 * time.Second
+
+// availableTimeout limits each wait of ServeConnWhenAvailable, viewers
+// retry. A variable for tests.
+var availableTimeout = 30 * time.Second
 
 // Encodings.
 const (
@@ -140,8 +150,30 @@ func (s *Server) Damage(r image.Rectangle) {
 	}
 }
 
+// Unavailable disconnects the viewers served by ServeConnWhenAvailable.
+func (s *Server) Unavailable() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for c := range s.clients {
+		if c.gated {
+			c.dropped.Store(true)
+			// the WebSocket close handshake can take seconds
+			go func() { _ = c.conn.Close() }()
+		}
+	}
+}
+
 // ServeConn runs the RFB protocol on conn and blocks until it ends.
-func (s *Server) ServeConn(conn net.Conn) {
+func (s *Server) ServeConn(conn net.Conn) { s.serve(conn, false) }
+
+// ServeConnWhenAvailable is like ServeConn, but holds the viewer in the
+// handshake until Options.Available reports the display, so that viewers
+// such as noVNC show that they are connecting. It gives up after
+// availableTimeout (the viewer may retry), and Unavailable disconnects the
+// viewer later.
+func (s *Server) ServeConnWhenAvailable(conn net.Conn) { s.serve(conn, true) }
+
+func (s *Server) serve(conn net.Conn, gated bool) {
 	defer conn.Close()
 	log := s.log.With("viewer", conn.RemoteAddr().String())
 	c := &client{
@@ -150,21 +182,16 @@ func (s *Server) ServeConn(conn net.Conn) {
 		r:      bufio.NewReader(conn),
 		w:      bufio.NewWriterSize(conn, 64<<10),
 		log:    log,
+		gated:  gated && s.opts.Available != nil,
 		pf:     defaultPixelFormat,
 		wake:   make(chan struct{}, 1),
 		closed: make(chan struct{}),
 	}
-	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(handshakeTimeout))
 	if err := c.handshake(); err != nil {
 		log.Info("handshake failed", "err", err)
 		return
 	}
-	_ = conn.SetDeadline(time.Time{})
-	log.Info("viewer connected")
-
-	s.mu.Lock()
-	s.clients[c] = struct{}{}
-	s.mu.Unlock()
 	if s.opts.OnAttach != nil {
 		s.opts.OnAttach()
 	}
@@ -176,13 +203,50 @@ func (s *Server) ServeConn(conn net.Conn) {
 			s.opts.OnDetach()
 		}
 	}()
+	var peeked <-chan error
+	if c.gated {
+		peeked = c.watch()
+		if err := c.waitAvailable(peeked); err != nil {
+			log.Info("closing before ServerInit", "err", err)
+			return
+		}
+	}
+	if err := c.serverInit(); err != nil {
+		log.Info("handshake failed", "err", err)
+		return
+	}
+	_ = conn.SetDeadline(time.Time{})
+
+	s.mu.Lock()
+	s.clients[c] = struct{}{}
+	s.mu.Unlock()
+	// Unavailable may have run between the wait and the registration
+	if c.gated {
+		select {
+		case <-s.opts.Available():
+		default:
+			log.Info("display became unavailable, closing")
+			return
+		}
+	}
+	log.Info("viewer connected")
 
 	go c.writer()
-	err := c.reader()
+	var err error
+	if peeked != nil {
+		err = <-peeked // the watcher owns c.r until it reports
+	}
+	if err == nil {
+		err = c.reader()
+	}
 	close(c.closed)
-	if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
+	switch {
+	case c.dropped.Load():
+		// the error only says that the connection was closed
+		log.Info("viewer disconnected", "reason", "display unavailable")
+	case errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed):
 		log.Info("viewer disconnected")
-	} else {
+	default:
 		log.Info("viewer disconnected", "err", err)
 	}
 }
@@ -233,6 +297,9 @@ type client struct {
 	w    *bufio.Writer
 	log  *slog.Logger
 
+	gated   bool        // served by ServeConnWhenAvailable
+	dropped atomic.Bool // closed by Unavailable
+
 	wake   chan struct{}
 	closed chan struct{}
 
@@ -275,6 +342,7 @@ func (c *client) send(b ...byte) {
 	c.signal()
 }
 
+// handshake runs the protocol up to and including ClientInit.
 func (c *client) handshake() error {
 	if _, err := io.WriteString(c.conn, "RFB 003.008\n"); err != nil {
 		return err
@@ -340,9 +408,43 @@ func (c *client) handshake() error {
 		return errors.New("authentication failed")
 	}
 
-	if _, err := c.r.ReadByte(); err != nil { // ClientInit shared flag
-		return err
+	_, err := c.r.ReadByte() // ClientInit shared flag
+	return err
+}
+
+// watch waits in the background for the viewer's first message, so that a
+// viewer leaving during waitAvailable is noticed. c.r belongs to the
+// watcher until it has sent its result.
+func (c *client) watch() <-chan error {
+	_ = c.conn.SetReadDeadline(time.Time{}) // waitAvailable limits the wait
+	peeked := make(chan error, 1)
+	go func() {
+		_, err := c.r.Peek(1)
+		peeked <- err
+	}()
+	return peeked
+}
+
+// waitAvailable holds the viewer before ServerInit until the display is
+// available, for at most availableTimeout.
+func (c *client) waitAvailable(peeked <-chan error) error {
+	t := time.NewTimer(availableTimeout)
+	defer t.Stop()
+	select {
+	case <-c.srv.opts.Available():
+		return c.conn.SetWriteDeadline(time.Now().Add(handshakeTimeout))
+	case <-t.C:
+		return fmt.Errorf("display not available after %v", availableTimeout)
+	case err := <-peeked:
+		if err == nil {
+			return errors.New("viewer sent data before ServerInit")
+		}
+		return fmt.Errorf("viewer left: %w", err)
 	}
+}
+
+// serverInit sends ServerInit, completing the handshake.
+func (c *client) serverInit() error {
 	w, h := c.srv.opts.Display.Size()
 	c.w0, c.h0 = w, h
 	b := binary.BigEndian.AppendUint16(nil, uint16(w))
