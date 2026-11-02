@@ -88,14 +88,8 @@ func run() error {
 		OnDetach: console.Detach,
 		Power:    powerControl(ipmi.New(iloCfg.URL.Hostname(), ipmi.Port, iloCfg.User, iloCfg.Password, log)),
 	})
-	console.OnUpdate(func(u ilo.Update) {
-		if u.Resized {
-			srv.Resize()
-		}
-		if !u.Dirty.Empty() {
-			srv.Damage(u.Dirty)
-		}
-	})
+	// the RFB server notices size changes itself when it sends the damage
+	console.OnUpdate(srv.Damage)
 	if cfg.VNCPassword == "" {
 		for _, a := range []string{cfg.Listen, cfg.VNC} {
 			if a != "" && !isLoopback(a) {

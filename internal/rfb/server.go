@@ -142,15 +142,6 @@ func (s *Server) Damage(r image.Rectangle) {
 	}
 }
 
-// Resize tells all viewers that the display size changed.
-func (s *Server) Resize() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for c := range s.clients {
-		c.resize()
-	}
-}
-
 // ServeConn runs the RFB protocol on conn and blocks until it ends.
 func (s *Server) ServeConn(conn net.Conn) {
 	defer conn.Close()
@@ -259,8 +250,7 @@ type client struct {
 	xvp         bool // XVP_INIT was sent
 	sentPseudo  bool
 	dirty       image.Rectangle
-	want        bool // an update request is outstanding
-	needResize  bool
+	want        bool   // an update request is outstanding
 	w0, h0      int    // size last told to the viewer
 	out         []byte // server messages waiting for the writer
 
@@ -286,13 +276,6 @@ func (c *client) damage(r image.Rectangle) {
 func (c *client) send(b ...byte) {
 	c.mu.Lock()
 	c.out = append(c.out, b...)
-	c.mu.Unlock()
-	c.signal()
-}
-
-func (c *client) resize() {
-	c.mu.Lock()
-	c.needResize = true
 	c.mu.Unlock()
 	c.signal()
 }
@@ -653,17 +636,14 @@ func (c *client) maybeUpdate() error {
 		}
 		c.sentPseudo = true
 	}
-	if c.needResize || w != c.w0 || h != c.h0 {
-		c.needResize = false
-		if w != c.w0 || h != c.h0 {
-			if c.desktopSize {
-				rects = append(rects, rect{r: image.Rect(0, 0, w, h), enc: encDesktopSize})
-			} else {
-				c.log.Warn("display resized but viewer does not support DesktopSize", "width", w, "height", h)
-			}
-			c.w0, c.h0 = w, h
-			c.dirty = image.Rect(0, 0, w, h)
+	if w != c.w0 || h != c.h0 {
+		if c.desktopSize {
+			rects = append(rects, rect{r: image.Rect(0, 0, w, h), enc: encDesktopSize})
+		} else {
+			c.log.Warn("display resized but viewer does not support DesktopSize", "width", w, "height", h)
 		}
+		c.w0, c.h0 = w, h
+		c.dirty = image.Rect(0, 0, w, h)
 	}
 	dirty := c.dirty.Intersect(image.Rect(0, 0, w, h))
 	c.dirty = image.Rectangle{}

@@ -11,7 +11,7 @@ func pixel(f *Framebuffer, x, y int) uint32 {
 	return p[0]
 }
 
-func mustApply(t *testing.T, f *Framebuffer, msg any) Update {
+func mustApply(t *testing.T, f *Framebuffer, msg any) image.Rectangle {
 	t.Helper()
 	u, err := f.Apply(msg)
 	if err != nil {
@@ -80,9 +80,8 @@ func TestDefaultPalette(t *testing.T) {
 
 func TestEnhanceRaw16(t *testing.T) {
 	f := NewFramebuffer()
-	u := mustApply(t, f, VesaMode{Mode: 0x111, Width: 6, Height: 3, BPP: 16})
-	if !u.Resized {
-		t.Fatal("expected resize")
+	if u := mustApply(t, f, VesaMode{Mode: 0x111, Width: 6, Height: 3, BPP: 16}); u != image.Rect(0, 0, 6, 3) {
+		t.Fatalf("mode change dirty %v", u)
 	}
 	// 4x2 tiles: tile columns 0,1 (x 0-3, 4-7), rows 0,1 (y 0-1, 2-3).
 	// Only tile (1,1) present: covers x 4..7, y 2..3, of which x 4,5 y 2
@@ -95,9 +94,9 @@ func TestEnhanceRaw16(t *testing.T) {
 		data[2*i], data[2*i+1] = byte(v), byte(v>>8)
 	}
 	m.Data = data
-	u = mustApply(t, f, m)
-	if u.Dirty != image.Rect(4, 2, 6, 3) {
-		t.Fatalf("dirty %v", u.Dirty)
+	u := mustApply(t, f, m)
+	if u != image.Rect(4, 2, 6, 3) {
+		t.Fatalf("dirty %v", u)
 	}
 	if pixel(f, 4, 2) != 0xFF0000 || pixel(f, 5, 2) != 0x00FF00 {
 		t.Fatalf("pixels %06X %06X", pixel(f, 4, 2), pixel(f, 5, 2))
@@ -125,8 +124,8 @@ func TestEnhanceHLC24(t *testing.T) {
 	m := EnhanceBitBlt{Type: bltEnhanceHLC | bltNewFrameMarker, TileW: 2, TileH: 2, TripletCode: 0xF0, RepeatCode: 0xF1, Data: data}
 	m.Lo[0] = 1
 	u := mustApply(t, f, m)
-	if u.Dirty != image.Rect(0, 0, 2, 2) {
-		t.Fatalf("dirty %v", u.Dirty)
+	if u != image.Rect(0, 0, 2, 2) {
+		t.Fatalf("dirty %v", u)
 	}
 	want := []uint32{0x302010, 0x312010, 0x322010, 0x33F011}
 	for i, w := range want {
@@ -192,8 +191,8 @@ func TestBitBltRGB32(t *testing.T) {
 		Type: bltCopy, Dst: Region{X: 1, Y: 1, W: 2, H: 1},
 		Data: []byte{0x01, 0x02, 0x03, 0xFF, 0x0A, 0x0B, 0x0C, 0xFF},
 	})
-	if u.Dirty != image.Rect(1, 1, 3, 2) {
-		t.Fatalf("dirty %v", u.Dirty)
+	if u != image.Rect(1, 1, 3, 2) {
+		t.Fatalf("dirty %v", u)
 	}
 	if pixel(f, 1, 1) != 0x030201 || pixel(f, 2, 1) != 0x0C0B0A {
 		t.Fatalf("pixels %06X %06X", pixel(f, 1, 1), pixel(f, 2, 1))
@@ -221,8 +220,8 @@ func TestTextRender(t *testing.T) {
 	// type 0x107: chars + attrs + font for cell (2,1), attr fg=0xE bg=0x1
 	data := append([]byte{0x41, 0x1E}, font...)
 	u := mustApply(t, f, BitBlt{Type: 0x107, FontHeight: 16, FontWidth: 8, Dst: Region{X: 2, Y: 1, W: 1, H: 1}, Data: data})
-	if u.Dirty != image.Rect(16, 16, 24, 32) {
-		t.Fatalf("dirty %v", u.Dirty)
+	if u != image.Rect(16, 16, 24, 32) {
+		t.Fatalf("dirty %v", u)
 	}
 	fg, bg := uint32(0xE0)<<16, uint32(0x10)<<16
 	if pixel(f, 16, 16) != fg || pixel(f, 17, 16) != bg || pixel(f, 23, 16) != fg {
@@ -234,8 +233,8 @@ func TestTextRender(t *testing.T) {
 
 	// cursor on scanlines 14-15 of that cell paints fg
 	u = mustApply(t, f, TextCursor{Col: 2, Row: 1, Start: 14, Stop: 15})
-	if u.Dirty != image.Rect(16, 16, 24, 32) {
-		t.Fatalf("cursor dirty %v", u.Dirty)
+	if u != image.Rect(16, 16, 24, 32) {
+		t.Fatalf("cursor dirty %v", u)
 	}
 	if pixel(f, 17, 16+14) != fg {
 		t.Fatal("cursor not drawn")
@@ -281,7 +280,7 @@ func TestAttributeColorIndex(t *testing.T) {
 	}
 	// color index 1 selects attribute entry 0x10|3
 	u := mustApply(t, f, SpecialGraphicsBit{Value: 1 << 8})
-	if u.Dirty.Empty() || pixel(f, 0, 0) != 0x000700 {
+	if u.Empty() || pixel(f, 0, 0) != 0x000700 {
 		t.Fatalf("bank 1: %06X", pixel(f, 0, 0))
 	}
 }
@@ -290,8 +289,8 @@ func TestStandby(t *testing.T) {
 	f := NewFramebuffer()
 	mustApply(t, f, VesaMode{Mode: 0x118, Width: 800, Height: 600, BPP: 32})
 	u := mustApply(t, f, StandbyPower{})
-	if w, h := f.Size(); w != 640 || h != 480 || !u.Resized {
-		t.Fatalf("size %dx%d resized=%v", w, h, u.Resized)
+	if w, h := f.Size(); w != 640 || h != 480 || u != image.Rect(0, 0, 640, 480) {
+		t.Fatalf("size %dx%d dirty %v", w, h, u)
 	}
 }
 
@@ -348,8 +347,8 @@ func TestTextBlink(t *testing.T) {
 		t.Fatalf("phase on: cursor %06X blink %06X plain %06X", pixel(f, 9, 14), pixel(f, 0, 0), pixel(f, 8, 0))
 	}
 	u := f.ToggleBlink()
-	if u.Dirty != image.Rect(0, 0, 16, 16) {
-		t.Fatalf("dirty %v", u.Dirty)
+	if u != image.Rect(0, 0, 16, 16) {
+		t.Fatalf("dirty %v", u)
 	}
 	// phase off: no cursor, blinking text visible
 	if pixel(f, 8+1, 14) != bg || pixel(f, 0, 0) != fg || pixel(f, 8, 0) != fg {
@@ -362,8 +361,8 @@ func TestTextBlink(t *testing.T) {
 
 	// graphics mode: nothing to blink
 	mustApply(t, f, VesaMode{Mode: 0x111, Width: 640, Height: 480, BPP: 16})
-	if u := f.ToggleBlink(); !u.Dirty.Empty() {
-		t.Fatalf("graphics dirty %v", u.Dirty)
+	if u := f.ToggleBlink(); !u.Empty() {
+		t.Fatalf("graphics dirty %v", u)
 	}
 }
 
@@ -372,8 +371,8 @@ func TestBlank(t *testing.T) {
 	font := make([]byte, 0x42*32)
 	font[0x41*32] = 0xFF
 	mustApply(t, f, BitBlt{Type: 0x107, FontHeight: 16, FontWidth: 8, Dst: Region{W: 1, H: 1}, Data: append([]byte{0x41, 0x1E}, font...)})
-	if u := f.Blank(); u.Dirty != image.Rect(0, 0, 640, 400) {
-		t.Fatalf("dirty %v", u.Dirty)
+	if u := f.Blank(); u != image.Rect(0, 0, 640, 400) {
+		t.Fatalf("dirty %v", u)
 	}
 	if pixel(f, 0, 0) != 0 {
 		t.Fatalf("pixel %06X", pixel(f, 0, 0))

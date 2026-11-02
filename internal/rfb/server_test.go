@@ -243,7 +243,7 @@ func TestResize(t *testing.T) {
 	d.mu.Lock()
 	d.w, d.h, d.pix = 3, 1, []uint32{7, 8, 9}
 	d.mu.Unlock()
-	srv.Resize()
+	srv.Damage(image.Rect(0, 0, 3, 1))
 
 	if n := v.updateHeader(); n != 2 {
 		t.Fatalf("rects %d", n)

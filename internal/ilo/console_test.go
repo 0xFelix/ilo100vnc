@@ -120,8 +120,8 @@ func TestConsoleEndToEnd(t *testing.T) {
 		URL: u, User: "admin", Password: "pw",
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
-	updates := make(chan Update, 10)
-	c.OnUpdate(func(u Update) { updates <- u })
+	updates := make(chan image.Rectangle, 10)
+	c.OnUpdate(func(u image.Rectangle) { updates <- u })
 	c.Attach()
 	defer c.Close()
 
@@ -129,7 +129,7 @@ func TestConsoleEndToEnd(t *testing.T) {
 	for {
 		select {
 		case u := <-updates:
-			if u.Dirty != image.Rect(0, 0, 2, 2) {
+			if u != image.Rect(0, 0, 2, 2) {
 				continue
 			}
 			if w, h := c.Framebuffer().Size(); w != 320 || h != 200 {

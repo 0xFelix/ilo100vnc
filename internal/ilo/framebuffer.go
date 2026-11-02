@@ -110,25 +110,19 @@ func (f *Framebuffer) Read(r image.Rectangle, dst []uint32) image.Rectangle {
 	return r
 }
 
-// Update is the result of applying a message.
-type Update struct {
-	Dirty   image.Rectangle // area that changed, empty if none
-	Resized bool            // dimensions changed
-}
-
-// Apply updates the framebuffer with a decoded server message. Messages
-// that do not affect the screen are ignored.
-func (f *Framebuffer) Apply(msg any) (Update, error) {
+// Apply updates the framebuffer with a decoded server message and returns
+// the changed area, empty if none. Messages that do not affect the screen
+// are ignored.
+func (f *Framebuffer) Apply(msg any) (image.Rectangle, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	switch m := msg.(type) {
 	case VesaMode:
 		return f.setMode(int(m.Mode), int(m.Width), int(m.Height), int(m.BPP)), nil
 	case StandbyPower:
-		u := f.setMode(-1, 640, 480, 16)
+		f.setMode(-1, 640, 480, 16)
 		clear(f.pix)
-		u.Dirty = f.bounds()
-		return u, nil
+		return f.bounds(), nil
 	case SetPalette:
 		return f.setPalette(m), nil
 	case BitBlt:
@@ -140,7 +134,7 @@ func (f *Framebuffer) Apply(msg any) (Update, error) {
 	case SpecialGraphicsBit:
 		return f.specialBits(m), nil
 	}
-	return Update{}, nil
+	return image.Rectangle{}, nil
 }
 
 func (f *Framebuffer) bounds() image.Rectangle { return image.Rect(0, 0, f.w, f.h) }
@@ -181,15 +175,14 @@ func (m VesaMode) Usable() bool {
 	return m.Width >= minGraphicsW && m.Height >= minGraphicsH
 }
 
-func (f *Framebuffer) setMode(mode, w, h, bpp int) Update {
+func (f *Framebuffer) setMode(mode, w, h, bpp int) image.Rectangle {
 	if w <= 0 || h <= 0 || w > maxDim || h > maxDim {
-		return Update{}
+		return image.Rectangle{}
 	}
 	cols, rows, text := isTextMode(mode)
 	if f.pix != nil && mode == f.mode && bpp == f.srcBPP && w == f.w && h == f.h && text == f.text {
-		return Update{}
+		return image.Rectangle{}
 	}
-	resized := w != f.w || h != f.h
 	f.mode, f.srcBPP, f.w, f.h, f.text = mode, bpp, w, h, text
 	f.special4bpp = false
 	f.pix = make([]uint32, w*h)
@@ -209,7 +202,7 @@ func (f *Framebuffer) setMode(mode, w, h, bpp int) Update {
 		f.defaultPalette()
 	}
 	f.refreshIndexed(f.bounds())
-	return Update{Dirty: f.bounds(), Resized: resized}
+	return f.bounds()
 }
 
 func (f *Framebuffer) setGrid(cols, rows int) {
@@ -311,7 +304,7 @@ func pixelAt(data []byte, off, n int) uint32 {
 
 // --- palette ---
 
-func (f *Framebuffer) setPalette(m SetPalette) Update {
+func (f *Framebuffer) setPalette(m SetPalette) image.Rectangle {
 	f.validPalette = true
 	for _, a := range m.Attributes {
 		f.attrs[a.Index&63] = a.Value
@@ -320,15 +313,15 @@ func (f *Framebuffer) setPalette(m SetPalette) Update {
 		f.palette[c.Index] = [3]byte{c.R, c.G, c.B}
 	}
 	if !f.indexed() {
-		return Update{}
+		return image.Rectangle{}
 	}
 	f.refreshIndexed(f.bounds())
-	return Update{Dirty: f.bounds()}
+	return f.bounds()
 }
 
 // --- BitBlt ---
 
-func (f *Framebuffer) bitBlt(m BitBlt) (Update, error) {
+func (f *Framebuffer) bitBlt(m BitBlt) (image.Rectangle, error) {
 	t := int(m.Type)
 	switch {
 	case t == bltCopy:
@@ -339,18 +332,18 @@ func (f *Framebuffer) bitBlt(m BitBlt) (Update, error) {
 		return f.blitRect(m)
 	case t >= bltTextFirst && t <= bltTextCombo:
 		if !f.text {
-			return Update{}, nil
+			return image.Rectangle{}, nil
 		}
 		f.special4bpp = false
 		return f.blitText(m)
 	}
-	return Update{}, nil
+	return image.Rectangle{}, nil
 }
 
-func (f *Framebuffer) blitRect(m BitBlt) (Update, error) {
+func (f *Framebuffer) blitRect(m BitBlt) (image.Rectangle, error) {
 	x0, y0, w, h := int(m.Dst.X), int(m.Dst.Y), int(m.Dst.W), int(m.Dst.H)
 	if w <= 0 || h <= 0 {
-		return Update{}, nil
+		return image.Rectangle{}, nil
 	}
 	d := m.Data
 	switch {
@@ -358,7 +351,7 @@ func (f *Framebuffer) blitRect(m BitBlt) (Update, error) {
 		// nibbles; within a row k counts from w-1 down to 0,
 		// even k takes the high nibble
 		if len(d) < (w*h+1)/2 {
-			return Update{}, errShortData
+			return image.Rectangle{}, errShortData
 		}
 		i := 0
 		for y := range h {
@@ -373,7 +366,7 @@ func (f *Framebuffer) blitRect(m BitBlt) (Update, error) {
 		}
 	case f.srcBPP == 8:
 		if len(d) < w*h {
-			return Update{}, errShortData
+			return image.Rectangle{}, errShortData
 		}
 		for y := range h {
 			for x := range w {
@@ -383,7 +376,7 @@ func (f *Framebuffer) blitRect(m BitBlt) (Update, error) {
 	default:
 		bpp := f.bytesPerPixel()
 		if len(d) < w*h*bpp {
-			return Update{}, errShortData
+			return image.Rectangle{}, errShortData
 		}
 		for y := range h {
 			for x := range w {
@@ -391,7 +384,7 @@ func (f *Framebuffer) blitRect(m BitBlt) (Update, error) {
 			}
 		}
 	}
-	return Update{Dirty: image.Rect(x0, y0, x0+w, y0+h).Intersect(f.bounds())}, nil
+	return image.Rect(x0, y0, x0+w, y0+h).Intersect(f.bounds()), nil
 }
 
 func (f *Framebuffer) inside(x, y int) bool { return x >= 0 && y >= 0 && x < f.w && y < f.h }
@@ -416,7 +409,7 @@ func (f *Framebuffer) putRGB(x, y int, v uint32) {
 
 // --- text mode ---
 
-func (f *Framebuffer) blitText(m BitBlt) (Update, error) {
+func (f *Framebuffer) blitText(m BitBlt) (image.Rectangle, error) {
 	if m.FontWidth > 0 && m.FontHeight > 0 && m.FontHeight <= glyphBytes &&
 		(int(m.FontWidth) != f.fontW || int(m.FontHeight) != f.fontH) {
 		f.fontW, f.fontH = int(m.FontWidth), int(m.FontHeight)
@@ -424,7 +417,7 @@ func (f *Framebuffer) blitText(m BitBlt) (Update, error) {
 	}
 	x0, y0, w, h := int(m.Dst.X), int(m.Dst.Y), int(m.Dst.W), int(m.Dst.H)
 	if w <= 0 || h <= 0 {
-		return Update{}, nil
+		return image.Rectangle{}, nil
 	}
 	d := m.Data
 	cell := func(i int) (int, bool) {
@@ -457,13 +450,13 @@ func (f *Framebuffer) blitText(m BitBlt) (Update, error) {
 		}
 		if m.Type&textASCII != 0 {
 			if err := section(f.chars); err != nil {
-				return Update{}, err
+				return image.Rectangle{}, err
 			}
 		}
 		if m.Type&textAttr != 0 {
 			f.attrValid = true
 			if err := section(f.cattr); err != nil {
-				return Update{}, err
+				return image.Rectangle{}, err
 			}
 		}
 		if m.Type&textFont != 0 {
@@ -476,7 +469,7 @@ func (f *Framebuffer) blitText(m BitBlt) (Update, error) {
 		}
 	}
 	r := image.Rect(x0*f.fontW, y0*f.fontH, (x0+w)*f.fontW, (y0+h)*f.fontH)
-	return Update{Dirty: r.Intersect(f.bounds())}, nil
+	return r.Intersect(f.bounds()), nil
 }
 
 // renderCell draws one character cell (PROTOCOL.md 6.3) in the current
@@ -529,11 +522,11 @@ func (f *Framebuffer) renderCell(col, row int) {
 
 // ToggleBlink switches the text blink phase (cursor and blinking text).
 // The original viewer does this every 500 ms in text mode.
-func (f *Framebuffer) ToggleBlink() Update {
+func (f *Framebuffer) ToggleBlink() image.Rectangle {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if !f.text {
-		return Update{}
+		return image.Rectangle{}
 	}
 	f.blinkOn = !f.blinkOn
 	var dirty image.Rectangle
@@ -550,12 +543,12 @@ func (f *Framebuffer) ToggleBlink() Update {
 			}
 		}
 	}
-	return Update{Dirty: dirty}
+	return dirty
 }
 
 // Blank clears the screen to black at the current size, used while the
 // iLO reports a mode it cannot capture.
-func (f *Framebuffer) Blank() Update {
+func (f *Framebuffer) Blank() image.Rectangle {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	clear(f.pix)
@@ -564,20 +557,20 @@ func (f *Framebuffer) Blank() Update {
 	clear(f.chars)
 	clear(f.cattr)
 	f.curCol = -1
-	return Update{Dirty: f.bounds()}
+	return f.bounds()
 }
 
 func (f *Framebuffer) cellRect(col, row int) image.Rectangle {
 	return image.Rect(col*f.fontW, row*f.fontH, (col+1)*f.fontW, (row+1)*f.fontH).Intersect(f.bounds())
 }
 
-func (f *Framebuffer) setTextCursor(m TextCursor) Update {
+func (f *Framebuffer) setTextCursor(m TextCursor) image.Rectangle {
 	if !f.text {
-		return Update{}
+		return image.Rectangle{}
 	}
 	col, row := int(m.Col), int(m.Row)
 	if col >= f.cols || row >= f.rows || (m.Start != m.Stop && int(m.Stop) >= f.fontH) {
-		return Update{}
+		return image.Rectangle{}
 	}
 	oldCol, oldRow := f.curCol, f.curRow
 	dirty := image.Rectangle{}
@@ -597,10 +590,10 @@ func (f *Framebuffer) setTextCursor(m TextCursor) Update {
 		f.renderCell(f.curCol, f.curRow)
 		dirty = dirty.Union(f.cellRect(f.curCol, f.curRow))
 	}
-	return Update{Dirty: dirty}
+	return dirty
 }
 
-func (f *Framebuffer) specialBits(m SpecialGraphicsBit) Update {
+func (f *Framebuffer) specialBits(m SpecialGraphicsBit) image.Rectangle {
 	textChanged := m.Blinking() != f.blinking || m.DBESwap() != f.dbe ||
 		m.PrimaryOffset() != f.primaryOff || m.SecondaryOffset() != f.secondaryOff
 	colorChanged := m.ColorIndex() != f.colorIndex
@@ -614,12 +607,12 @@ func (f *Framebuffer) specialBits(m SpecialGraphicsBit) Update {
 				f.renderCell(col, row)
 			}
 		}
-		return Update{Dirty: f.bounds()}
+		return f.bounds()
 	case colorChanged && (f.text || f.srcBPP < 8):
 		f.refreshIndexed(f.bounds())
-		return Update{Dirty: f.bounds()}
+		return f.bounds()
 	}
-	return Update{}
+	return image.Rectangle{}
 }
 
 // --- EnhanceBitBlt ---
@@ -648,7 +641,7 @@ func tileWalk(m EnhanceBitBlt, w, h int, fn func(tx, ty int) error) (image.Recta
 	return dirty.Intersect(image.Rect(0, 0, w, h)), nil
 }
 
-func (f *Framebuffer) enhanceBitBlt(m EnhanceBitBlt) (Update, error) {
+func (f *Framebuffer) enhanceBitBlt(m EnhanceBitBlt) (image.Rectangle, error) {
 	tw, th := int(m.TileW), int(m.TileH)
 	var dirty image.Rectangle
 	var err error
@@ -679,7 +672,7 @@ func (f *Framebuffer) enhanceBitBlt(m EnhanceBitBlt) (Update, error) {
 		var planes []*rlePlane
 		planes, err = f.hlcPlanes(m)
 		if err != nil {
-			return Update{}, err
+			return image.Rectangle{}, err
 		}
 		dirty, err = tileWalk(m, f.w, f.h, func(x0, y0 int) error {
 			for y := range th {
@@ -722,7 +715,7 @@ func (f *Framebuffer) enhanceBitBlt(m EnhanceBitBlt) (Update, error) {
 			return nil
 		})
 	}
-	return Update{Dirty: dirty}, err
+	return dirty, err
 }
 
 // hlcPlanes splits an HLC payload into its RLE byte planes (PROTOCOL.md 6.2).

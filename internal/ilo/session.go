@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"image"
 	"log/slog"
 	"net"
 	"strconv"
@@ -32,7 +33,7 @@ type Session struct {
 	state     MultiUserState
 	ready     bool
 	relative  bool
-	onUpdate  func(Update)
+	onUpdate  func(image.Rectangle)
 	mode      VesaMode
 	stats     *videoStats // debug only
 	requested bool        // full control requested, awaiting the answer
@@ -44,7 +45,7 @@ type SessionOptions struct {
 	Relative bool // relative instead of absolute mouse
 	Log      *slog.Logger
 	Debug    bool // hex dump all traffic
-	OnUpdate func(Update)
+	OnUpdate func(image.Rectangle)
 }
 
 // ErrKVMSSL is returned for an encrypted KVM session (sessiontype kvmssl).
@@ -192,8 +193,8 @@ func (s *Session) handle(msg any, user, token string) error {
 		if !m.Usable() {
 			return s.onUnusableMode(m)
 		}
-		u, _ := s.fb.Apply(m)
-		s.update(u)
+		dirty, _ := s.fb.Apply(m)
+		s.update(dirty)
 		s.mu.Lock()
 		s.mode = m
 		s.mu.Unlock()
@@ -201,21 +202,21 @@ func (s *Session) handle(msg any, user, token string) error {
 		return s.Send(EncodeInvalidate(s.fb.FullRegion()))
 
 	default:
-		u, err := s.fb.Apply(msg)
+		dirty, err := s.fb.Apply(msg)
 		if err != nil {
 			// a malformed blit only damages the picture, the stream is
 			// still in sync because the length was known
 			s.log.Warn("decode error", "type", fmt.Sprintf("%T", msg), "err", err)
 		}
-		s.update(u)
+		s.update(dirty)
 	}
 	return nil
 }
 
 // update passes a screen change on to OnUpdate.
-func (s *Session) update(u Update) {
-	if (u.Resized || !u.Dirty.Empty()) && s.onUpdate != nil {
-		s.onUpdate(u)
+func (s *Session) update(dirty image.Rectangle) {
+	if !dirty.Empty() && s.onUpdate != nil {
+		s.onUpdate(dirty)
 	}
 }
 

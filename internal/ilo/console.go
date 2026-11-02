@@ -3,6 +3,7 @@ package ilo
 import (
 	"context"
 	"errors"
+	"image"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -41,7 +42,7 @@ type Console struct {
 	done     chan struct{}
 	idle     *time.Timer
 	sess     *Session
-	onUpdate func(Update)
+	onUpdate func(image.Rectangle)
 
 	// input state, guarded by mu
 	buttons  Buttons
@@ -70,19 +71,20 @@ func NewConsole(cfg Config) *Console {
 // Framebuffer returns the decoded screen.
 func (c *Console) Framebuffer() *Framebuffer { return c.fb }
 
-// OnUpdate registers the function called after every screen change.
-func (c *Console) OnUpdate(fn func(Update)) {
+// OnUpdate registers the function called with the changed area after every
+// screen change.
+func (c *Console) OnUpdate(fn func(image.Rectangle)) {
 	c.mu.Lock()
 	c.onUpdate = fn
 	c.mu.Unlock()
 }
 
-func (c *Console) notify(u Update) {
+func (c *Console) notify(dirty image.Rectangle) {
 	c.mu.Lock()
 	fn := c.onUpdate
 	c.mu.Unlock()
 	if fn != nil {
-		fn(u)
+		fn(dirty)
 	}
 }
 
