@@ -219,12 +219,13 @@ func pointerMessages(t *testing.T, relative bool, want []byte, events ...[3]int)
 
 func TestKeyRepeat(t *testing.T) {
 	want := bytes.Join([][]byte{
-		// auto-repeated presses are sent once
+		// auto-repeated presses are forwarded
+		EncodeKey(0x52, true),
+		EncodeKey(0x52, true),
 		EncodeKey(0x52, true),
 		EncodeKey(0x52, false),
 		// a release without press is still sent (clears a key stuck in the iLO)
 		EncodeKey(0x51, false),
-		EncodeKey(0x52, true),
 	}, nil)
 	got := sentMessages(t, false, want, func(c *Console) {
 		c.Scancode(0xC8, true)
@@ -232,7 +233,6 @@ func TestKeyRepeat(t *testing.T) {
 		c.Scancode(0xC8, true)
 		c.Scancode(0xC8, false)
 		c.Scancode(0xD0, false)
-		c.Scancode(0xC8, true)
 	})
 	if !bytes.Equal(got, want) {
 		t.Fatalf("got % X\nwant % X", got, want)

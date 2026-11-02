@@ -236,16 +236,14 @@ func (c *Console) Scancode(code uint32, down bool) {
 	c.key(usage, down)
 }
 
-// key sends a press only once, like the original viewer: the iLO emulates a
-// USB keyboard, the host repeats held keys itself, and repeated presses
-// leave keys stuck. Releases are always sent.
+// key forwards a key event. The viewer's auto-repeated presses are passed
+// on as well: the iLO turns each press into a keystroke, and not every host
+// repeats held keys itself (BIOS Setup does not). Held keys are tracked so
+// they can be released when a viewer leaves.
 func (c *Console) key(usage uint16, down bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if down {
-		if c.keysDown[usage] {
-			return
-		}
 		c.keysDown[usage] = true
 	} else {
 		delete(c.keysDown, usage)
