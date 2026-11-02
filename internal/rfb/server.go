@@ -621,6 +621,8 @@ func (c *client) writer() {
 			return
 		case <-c.wake:
 		}
+		// a stalled viewer must not block the writer forever
+		_ = c.conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
 		err := c.writeQueued()
 		if err == nil {
 			err = c.maybeUpdate()

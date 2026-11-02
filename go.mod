@@ -2,7 +2,10 @@ module github.com/0xFelix/ilo100vnc
 
 go 1.27.0
 
-require github.com/bougou/go-ipmi v0.9.1
+require (
+	github.com/bougou/go-ipmi v0.9.1
+	github.com/coder/websocket v1.8.15
+)
 
 require (
 	github.com/fatih/color v1.15.0 // indirect

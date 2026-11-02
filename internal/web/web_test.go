@@ -1,9 +1,8 @@
 package web
 
 import (
-	"bufio"
 	"bytes"
-	"encoding/binary"
+	"context"
 	"io"
 	"net"
 	"net/http"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 )
 
 func echoServer(t *testing.T) *httptest.Server {
@@ -23,118 +24,59 @@ func echoServer(t *testing.T) *httptest.Server {
 	return srv
 }
 
-func dialWS(t *testing.T, srv *httptest.Server, origin string) (net.Conn, *bufio.Reader, string) {
+func dialWS(t *testing.T, srv *httptest.Server, origin string) (*websocket.Conn, *http.Response, error) {
 	t.Helper()
-	host := strings.TrimPrefix(srv.URL, "http://")
-	c, err := net.Dial("tcp", host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
-	req := "GET /websockify HTTP/1.1\r\nHost: " + host + "\r\n" +
-		"Upgrade: websocket\r\nConnection: keep-alive, Upgrade\r\n" +
-		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
-		"Sec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: binary\r\n"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	h := http.Header{}
 	if origin != "" {
-		req += "Origin: " + origin + "\r\n"
+		h.Set("Origin", origin)
 	}
-	if _, err := io.WriteString(c, req+"\r\n"); err != nil {
-		t.Fatal(err)
-	}
-	br := bufio.NewReader(c)
-	resp, err := http.ReadResponse(br, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	return c, br, resp.Status + "|" + resp.Header.Get("Sec-WebSocket-Accept") + "|" + resp.Header.Get("Sec-WebSocket-Protocol")
-}
-
-func frame(op byte, payload []byte) []byte {
-	mask := [4]byte{1, 2, 3, 4}
-	b := []byte{0x80 | op}
-	if len(payload) < 126 {
-		b = append(b, 0x80|byte(len(payload)))
-	} else {
-		b = append(b, 0x80|126)
-		b = binary.BigEndian.AppendUint16(b, uint16(len(payload)))
-	}
-	b = append(b, mask[:]...)
-	for i, c := range payload {
-		b = append(b, c^mask[i%4])
-	}
-	return b
-}
-
-func write(t *testing.T, c net.Conn, b []byte) {
-	t.Helper()
-	if _, err := c.Write(b); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func readFrame(t *testing.T, r *bufio.Reader) (byte, []byte) {
-	t.Helper()
-	var h [2]byte
-	if _, err := io.ReadFull(r, h[:]); err != nil {
-		t.Fatal(err)
-	}
-	n := int(h[1] & 0x7F)
-	if n == 126 {
-		var b [2]byte
-		if _, err := io.ReadFull(r, b[:]); err != nil {
-			t.Fatal(err)
-		}
-		n = int(binary.BigEndian.Uint16(b[:]))
-	}
-	p := make([]byte, n)
-	if _, err := io.ReadFull(r, p); err != nil {
-		t.Fatal(err)
-	}
-	return h[0] & 0x0F, p
+	return websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http")+"/websockify",
+		&websocket.DialOptions{HTTPHeader: h, Subprotocols: []string{"binary"}})
 }
 
 func TestWebSocketEcho(t *testing.T) {
 	srv := echoServer(t)
-	host := strings.TrimPrefix(srv.URL, "http://")
-	c, r, status := dialWS(t, srv, "http://"+host)
-	defer c.Close()
-	// RFC 6455 section 1.3 sample key/accept pair
-	if status != "101 Switching Protocols|s3pPLMBiTxaQ9kYGzzhZRbK+xOo=|binary" {
-		t.Fatalf("status %q", status)
+	c, _, err := dialWS(t, srv, srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.CloseNow() }()
+	if c.Subprotocol() != "binary" {
+		t.Fatalf("subprotocol %q", c.Subprotocol())
 	}
 
-	payload := bytes.Repeat([]byte("rfb"), 100) // 300 bytes, 16-bit length
-	write(t, c, frame(opBinary, payload))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	payload := bytes.Repeat([]byte("rfb"), 100)
+	if err := c.Write(ctx, websocket.MessageBinary, payload); err != nil {
+		t.Fatal(err)
+	}
 	var got []byte
 	for len(got) < len(payload) {
-		op, p := readFrame(t, r)
-		if op != opBinary {
-			t.Fatalf("opcode %d", op)
+		typ, p, err := c.Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if typ != websocket.MessageBinary {
+			t.Fatalf("message type %v", typ)
 		}
 		got = append(got, p...)
 	}
 	if !bytes.Equal(got, payload) {
 		t.Fatal("echo mismatch")
 	}
-
-	write(t, c, frame(opPing, []byte("hi")))
-	if op, p := readFrame(t, r); op != opPong || string(p) != "hi" {
-		t.Fatalf("pong %d %q", op, p)
-	}
-
-	write(t, c, frame(opClose, []byte{0x03, 0xE8}))
-	if op, _ := readFrame(t, r); op != opClose {
-		t.Fatalf("close reply %d", op)
+	if err := c.Close(websocket.StatusNormalClosure, ""); err != nil {
+		t.Fatal(err)
 	}
 }
 
 func TestWebSocketRejectsCrossOrigin(t *testing.T) {
 	srv := echoServer(t)
-	c, _, status := dialWS(t, srv, "https://evil.example")
-	defer c.Close()
-	if !strings.HasPrefix(status, "403") {
-		t.Fatalf("status %q", status)
+	_, resp, err := dialWS(t, srv, "https://evil.example")
+	if err == nil || resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("resp %v, err %v", resp, err)
 	}
 }
 

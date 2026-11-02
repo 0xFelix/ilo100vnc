@@ -9,7 +9,12 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+
+	"github.com/coder/websocket"
 )
+
+// maxMessage limits WebSocket messages from viewers.
+const maxMessage = 16 << 20
 
 // noVNC is not committed; `make novnc` downloads it into ./novnc.
 //
@@ -62,12 +67,14 @@ func Handler(serve func(net.Conn), log *slog.Logger) http.Handler {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /websockify", func(w http.ResponseWriter, r *http.Request) {
-		c, err := upgrade(w, r)
+		// Accept rejects cross-origin requests (cross-site WebSocket hijacking).
+		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{"binary"}})
 		if err != nil {
 			log.Info("websocket upgrade failed", "remote", r.RemoteAddr, "err", err)
 			return
 		}
-		serve(c)
+		c.SetReadLimit(maxMessage)
+		serve(websocket.NetConn(r.Context(), c, websocket.MessageBinary))
 	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok\n"))
