@@ -34,8 +34,6 @@ type Input interface {
 	// Scancode is a QEMU extended key event (PC set 1, extended = 0x80|code).
 	Scancode(code uint32, down bool)
 	Pointer(mask uint8, x, y int)
-	// ReleaseAll is called when a viewer disconnects.
-	ReleaseAll()
 }
 
 // PowerOp is an XVP message code. Codes from 0x80 are ilo100vnc extensions
@@ -174,9 +172,6 @@ func (s *Server) ServeConn(conn net.Conn) {
 		s.mu.Lock()
 		delete(s.clients, c)
 		s.mu.Unlock()
-		if s.opts.Input != nil {
-			s.opts.Input.ReleaseAll()
-		}
 		if s.opts.OnDetach != nil {
 			s.opts.OnDetach()
 		}

@@ -103,11 +103,12 @@ func (c *Console) Attach() {
 	}
 }
 
-// Detach unregisters a viewer. The session is closed after IdleTimeout
-// once no viewer is left.
+// Detach unregisters a viewer and releases held keys and buttons. The
+// session is closed after IdleTimeout once no viewer is left.
 func (c *Console) Detach() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.releaseAll()
 	c.viewers--
 	if c.viewers > 0 || c.cfg.IdleTimeout <= 0 || c.cancel == nil {
 		return
@@ -126,8 +127,8 @@ func (c *Console) Detach() {
 // Close releases held keys and buttons, stops the session and waits for it
 // to end.
 func (c *Console) Close() {
-	c.ReleaseAll()
 	c.mu.Lock()
+	c.releaseAll()
 	cancel, done := c.cancel, c.done
 	c.cancel = nil
 	c.mu.Unlock()
@@ -243,10 +244,8 @@ func (c *Console) key(usage uint16, down bool) {
 	c.send(EncodeKey(usage, down))
 }
 
-// ReleaseAll releases all keys and buttons, used when a viewer leaves.
-func (c *Console) ReleaseAll() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+// releaseAll releases all keys and buttons. Must be called with c.mu held.
+func (c *Console) releaseAll() {
 	for usage := range c.keysDown {
 		c.send(EncodeKey(usage, false))
 	}

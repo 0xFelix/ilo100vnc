@@ -59,8 +59,6 @@ func (f *fakeInput) Scancode(c uint32, down bool) { f.ch <- event{kind: "scan", 
 
 func (f *fakeInput) Pointer(m uint8, x, y int) { f.ch <- event{kind: "ptr", a: int(m), b: x, c: y} }
 
-func (f *fakeInput) ReleaseAll() { f.ch <- event{kind: "release"} }
-
 // viewer is a minimal scripted RFB client.
 type viewer struct {
 	t    *testing.T
@@ -259,7 +257,10 @@ func TestResize(t *testing.T) {
 
 func TestInputEvents(t *testing.T) {
 	in := &fakeInput{ch: make(chan event, 10)}
-	_, v, stop := startServer(t, Options{Display: newFakeDisplay(2, 2), Input: in, Name: "test"})
+	_, v, stop := startServer(t, Options{
+		Display: newFakeDisplay(2, 2), Input: in, Name: "test",
+		OnDetach: func() { in.ch <- event{kind: "detach"} },
+	})
 	v.init38()
 	v.write(4, 1, 0, 0, 0, 0, 0xFF, 0x0D)               // KeyEvent Return down
 	v.write(5, 0x05, 0, 10, 0, 20)                      // PointerEvent left+right at 10,20
@@ -278,8 +279,8 @@ func TestInputEvents(t *testing.T) {
 		}
 	}
 	stop()
-	if got := <-in.ch; got.kind != "release" {
-		t.Fatalf("got %+v want release", got)
+	if got := <-in.ch; got.kind != "detach" {
+		t.Fatalf("got %+v want detach", got)
 	}
 }
 
