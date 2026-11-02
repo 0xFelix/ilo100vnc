@@ -66,8 +66,6 @@ type Framebuffer struct {
 	dbe          bool
 	primaryOff   int
 	secondaryOff int
-
-	cursor *MatroxCursor
 }
 
 // NewFramebuffer returns a black 640x480 16bpp framebuffer, the viewer's
@@ -112,13 +110,6 @@ func (f *Framebuffer) Read(r image.Rectangle, dst []uint32) image.Rectangle {
 	return r
 }
 
-// Cursor returns the last hardware cursor image sent by the server, or nil.
-func (f *Framebuffer) Cursor() *MatroxCursor {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.cursor
-}
-
 // Update is the result of applying a message.
 type Update struct {
 	Dirty   image.Rectangle // area that changed, empty if none
@@ -148,8 +139,6 @@ func (f *Framebuffer) Apply(msg any) (Update, error) {
 		return f.setTextCursor(m), nil
 	case SpecialGraphicsBit:
 		return f.specialBits(m), nil
-	case *MatroxCursor:
-		f.cursor = m
 	}
 	return Update{}, nil
 }

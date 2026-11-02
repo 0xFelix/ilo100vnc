@@ -13,22 +13,19 @@ import (
 // Message ids, see docs/PROTOCOL.md sections 5 and 6.
 const (
 	// client -> server
-	msgStorageClientConnect    = 0x99
-	msgStorageClientDisconnect = 0x9A
-	msgClientAbsoluteMode      = 0xB1
-	msgClientRelativeMode      = 0xB2
-	msgButtonStateAtAbsolute   = 0xB3
-	msgButtonStateAtRelative   = 0xB4
-	msgMouseMove               = 0xB5
-	msgRequestKeyIndicators    = 0xC1
-	msgKeyStateChange          = 0xD1
-	msgClientNOP               = 0xD2
-	msgRequestPrimaryControl   = 0xD3
-	msgClientDisconnect        = 0xD8
-	msgClientHandshake         = 0xDD
-	msgRequestVesaMode         = 0xF1
-	msgInvalidate              = 0xF2
-	msgInformHLevelCompression = 0xF3
+	msgClientAbsoluteMode    = 0xB1
+	msgClientRelativeMode    = 0xB2
+	msgButtonStateAtAbsolute = 0xB3
+	msgButtonStateAtRelative = 0xB4
+	msgMouseMove             = 0xB5
+	msgRequestKeyIndicators  = 0xC1
+	msgKeyStateChange        = 0xD1
+	msgClientNOP             = 0xD2
+	msgRequestPrimaryControl = 0xD3
+	msgClientDisconnect      = 0xD8
+	msgClientHandshake       = 0xDD
+	msgRequestVesaMode       = 0xF1
+	msgInvalidate            = 0xF2
 
 	// server -> client
 	msgStorageStatus         = 0x89
@@ -48,27 +45,16 @@ const (
 	msgGraphicsRegisterValue = 0xEE
 )
 
-// Handshake signatures (ClientHandshake offset 0).
 const (
-	SignatureEmbedded   = 0x5A5A5A5A
-	SignatureStandalone = 0x12121212
-)
-
-// Rights requested in the ClientHandshake.
-const (
-	RightVideo    = 1 << 0
-	RightMouse    = 1 << 1
-	RightKeyboard = 1 << 2
-	RightStorage0 = 1 << 3
-	RightStorage1 = 1 << 4
-	RightAll      = 0x1F
+	// SignatureEmbedded is the ClientHandshake signature of the applet.
+	SignatureEmbedded = 0x5A5A5A5A
+	// RightAll requests video, mouse, keyboard and both storage devices.
+	RightAll = 0x1F
 )
 
 // MultiUserState session flags.
 const (
 	FlagCanTakeFullControl = 0x00000001
-	FlagStorageAllowed     = 0x00000100
-	FlagStorageEnabled     = 0x00200000
 	userStatusMask         = 0x18
 	userStatusShift        = 3
 )
@@ -206,11 +192,6 @@ func EncodeRequestPrimaryControl() []byte { return encodeByteMsg(msgRequestPrima
 // EncodeRequestVesaMode is 0xF1.
 func EncodeRequestVesaMode() []byte { return encodeByteMsg(msgRequestVesaMode, 0) }
 
-// EncodeHLevelCompression is 0xF3.
-func EncodeHLevelCompression(on bool) []byte {
-	return encodeByteMsg(msgInformHLevelCompression, boolByte(on))
-}
-
 // EncodeInvalidate is 0xF2.
 func EncodeInvalidate(regions ...Region) []byte {
 	b := []byte{msgInvalidate}
@@ -270,9 +251,6 @@ type ServerDisconnect struct {
 	Message string
 }
 
-// KeyIndicators (0xD5).
-type KeyIndicators struct{ Caps, Num, Scroll bool }
-
 // VesaMode (0xE1).
 type VesaMode struct {
 	Mode, Width, Height, BPP int16
@@ -282,7 +260,7 @@ type VesaMode struct {
 type BitBlt struct {
 	Type                  uint16
 	FontHeight, FontWidth uint8
-	Src, Dst              Region
+	Dst                   Region
 	Data                  []byte
 }
 
@@ -291,7 +269,6 @@ type EnhanceBitBlt struct {
 	Type                    uint16
 	TileW, TileH            uint8
 	TripletCode, RepeatCode uint32
-	RawSize                 uint32
 	Lo, Hi                  [snoopRows]uint32
 	Data                    []byte
 }
@@ -334,20 +311,13 @@ func (s SpecialGraphicsBit) SecondaryOffset() int { return charMapOffset[s.Value
 // ColorIndex is the 4bpp attribute table bank.
 func (s SpecialGraphicsBit) ColorIndex() int { return int(s.Value >> 8 & 3) }
 
-// MatroxCursor (0xEC).
-type MatroxCursor struct {
-	Control [256]byte
-	Data    [64][48]byte
-}
+// StorageStatus (0x89), ignored until virtual media is implemented.
+type StorageStatus struct{}
 
-// Mode returns the cursor mode (control byte 6).
-func (m *MatroxCursor) Mode() byte { return m.Control[6] }
-
-// StorageStatus (0x89), kept raw until virtual media is implemented.
-type StorageStatus struct{ Raw []byte }
-
-// GraphicsRegisters (0xEE), ignored.
-type GraphicsRegisters struct{}
+// ignored is a message that is only parsed to stay in sync with the
+// stream: key indicators (0xD5), the hardware cursor (0xEC, viewers draw
+// their own) and graphics registers (0xEE).
+type ignored struct{ id byte }
 
 // ErrUnknownMessage is returned for an id the protocol does not define.
 // The stream cannot be resynchronized after it.
@@ -494,11 +464,8 @@ func (rd *Reader) parse(id byte) (any, error) {
 		return ServerDisconnect{Reason: int32(reason), Message: string(b)}, nil
 
 	case msgInformKeyIndicators:
-		b, err := rd.read(3)
-		if err != nil {
-			return nil, err
-		}
-		return KeyIndicators{Caps: b[0] != 0, Num: b[1] != 0, Scroll: b[2] != 0}, nil
+		_, err := rd.read(3)
+		return ignored{id}, err
 
 	case msgInformVesaMode:
 		var m VesaMode
@@ -509,7 +476,7 @@ func (rd *Reader) parse(id byte) (any, error) {
 		var h struct {
 			Type                  uint16
 			FontHeight, FontWidth uint8
-			Src, Dst              Region
+			_, Dst                Region
 			Size                  uint32
 		}
 		if err := rd.decode(&h); err != nil {
@@ -518,17 +485,17 @@ func (rd *Reader) parse(id byte) (any, error) {
 		if h.Size > maxBlitData {
 			return nil, fmt.Errorf("bitblt size %d", h.Size)
 		}
-		m := BitBlt{Type: h.Type, FontHeight: h.FontHeight, FontWidth: h.FontWidth, Src: h.Src, Dst: h.Dst}
+		m := BitBlt{Type: h.Type, FontHeight: h.FontHeight, FontWidth: h.FontWidth, Dst: h.Dst}
 		var err error
 		m.Data, err = rd.bytes(int(h.Size))
 		return m, err
 
 	case msgEnhanceBitBlt:
 		var h struct {
-			Type                                   uint16
-			TileW, TileH                           uint8
-			TripletCode, RepeatCode, RawSize, Size uint32
-			Rows                                   [snoopRows]struct{ Lo, Hi uint32 }
+			Type                             uint16
+			TileW, TileH                     uint8
+			TripletCode, RepeatCode, _, Size uint32
+			Rows                             [snoopRows]struct{ Lo, Hi uint32 }
 		}
 		if err := rd.decode(&h); err != nil {
 			return nil, err
@@ -538,7 +505,7 @@ func (rd *Reader) parse(id byte) (any, error) {
 		}
 		m := EnhanceBitBlt{
 			Type: h.Type, TileW: h.TileW, TileH: h.TileH,
-			TripletCode: h.TripletCode, RepeatCode: h.RepeatCode, RawSize: h.RawSize,
+			TripletCode: h.TripletCode, RepeatCode: h.RepeatCode,
 		}
 		for i, r := range h.Rows {
 			m.Lo[i], m.Hi[i] = r.Lo, r.Hi
@@ -597,29 +564,16 @@ func (rd *Reader) parse(id byte) (any, error) {
 		return SpecialGraphicsBit{Value: v}, nil
 
 	case msgMatroxGraphicsCursor:
-		b, err := rd.read(256 + 64*48)
-		if err != nil {
-			return nil, err
-		}
-		m := &MatroxCursor{}
-		copy(m.Control[:], b)
-		for i := range m.Data {
-			copy(m.Data[i][:], b[256+i*48:])
-		}
-		return m, nil
+		_, err := rd.read(256 + 64*48)
+		return ignored{id}, err
 
 	case msgGraphicsRegisterValue:
-		if _, err := rd.read(17 * 4); err != nil {
-			return nil, err
-		}
-		return GraphicsRegisters{}, nil
+		_, err := rd.read(17 * 4)
+		return ignored{id}, err
 
 	case msgStorageStatus:
-		b, err := rd.bytes(1056)
-		if err != nil {
-			return nil, err
-		}
-		return StorageStatus{Raw: b}, nil
+		_, err := rd.read(1056)
+		return StorageStatus{}, err
 	}
 	return nil, fmt.Errorf("%w 0x%02X", ErrUnknownMessage, id)
 }

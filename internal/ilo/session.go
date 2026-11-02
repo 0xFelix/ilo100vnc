@@ -33,7 +33,6 @@ type Session struct {
 	ready     bool
 	relative  bool
 	onUpdate  func(Update)
-	onReady   func()
 	mode      VesaMode
 	stats     *videoStats // debug only
 	requested bool        // full control requested, awaiting the answer
@@ -46,7 +45,6 @@ type SessionOptions struct {
 	Log      *slog.Logger
 	Debug    bool // hex dump all traffic
 	OnUpdate func(Update)
-	OnReady  func()
 }
 
 // ErrKVMSSL is returned for an encrypted KVM session (sessiontype kvmssl).
@@ -72,7 +70,6 @@ func Dial(ctx context.Context, p Params, fb *Framebuffer, o SessionOptions) (*Se
 		fb:       fb,
 		relative: o.Relative,
 		onUpdate: o.OnUpdate,
-		onReady:  o.OnReady,
 	}
 	if s.log == nil {
 		s.log = slog.Default()
@@ -111,13 +108,6 @@ func redact(b []byte) []byte {
 		}
 	}
 	return r
-}
-
-// Ready reports whether the handshake has completed.
-func (s *Session) Ready() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.ready
 }
 
 // HasControl reports whether this session may send input.
@@ -320,9 +310,6 @@ func (s *Session) onMultiUserState(m MultiUserState) error {
 		if err := s.Send(b); err != nil {
 			return err
 		}
-	}
-	if first && s.onReady != nil {
-		s.onReady()
 	}
 	return nil
 }

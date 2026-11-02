@@ -124,7 +124,7 @@ func TestReaderSessionSetup(t *testing.T) {
 		t.Fatal(err)
 	}
 	mu := m.(MultiUserState)
-	if mu.UserStatus() != UserStatusFullControl || mu.Flags&FlagStorageAllowed == 0 {
+	if mu.UserStatus() != UserStatusFullControl || mu.Flags != 0x100 { // storage allowed
 		t.Fatalf("flags 0x%X", mu.Flags)
 	}
 	if mu.Users[0].Name != "admin" || !mu.Users[0].Self() || mu.Users[1].Name != "bob" || mu.Users[1].Self() {
@@ -133,7 +133,7 @@ func TestReaderSessionSetup(t *testing.T) {
 	if m, _ := rd.Next(); m.(VesaMode) != (VesaMode{Mode: 3, Width: 720, Height: 400, BPP: 4}) {
 		t.Fatalf("vesa %+v", m)
 	}
-	if m, _ := rd.Next(); m.(KeyIndicators) != (KeyIndicators{Caps: true, Scroll: true}) {
+	if m, _ := rd.Next(); m != (ignored{msgInformKeyIndicators}) {
 		t.Fatalf("indicators %+v", m)
 	}
 	if _, err := rd.Next(); err != io.EOF {
