@@ -584,7 +584,10 @@ func (c *client) writer() {
 			err = c.maybeUpdate()
 		}
 		if err != nil {
-			c.log.Info("write failed", "err", err)
+			// closed by the reader when the viewer left
+			if !errors.Is(err, net.ErrClosed) {
+				c.log.Info("write failed", "err", err)
+			}
 			return
 		}
 	}
