@@ -18,6 +18,9 @@ const (
 	traceLimit    = 256                    // bytes of each received body included in debug dumps
 	blinkInterval = 500 * time.Millisecond // text cursor/blink phase, as in the original viewer
 	statsInterval = 2 * time.Second        // debug video summary
+	// kvmUserTimeout drops the KVM connection when the iLO stops
+	// acknowledging data (Linux only, see dial_linux.go)
+	kvmUserTimeout = 20 * time.Second
 )
 
 // Session is one KVM connection to the iLO.
@@ -58,7 +61,7 @@ func Dial(ctx context.Context, p Params, fb *Framebuffer, o SessionOptions) (*Se
 		return nil, ErrKVMSSL
 	}
 	addr := net.JoinHostPort(p.Host, strconv.Itoa(p.Port))
-	d := net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	d := net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second, Control: dialControl}
 	conn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, err

@@ -5,6 +5,7 @@ go 1.27.0
 require (
 	github.com/bougou/go-ipmi v0.9.1
 	github.com/coder/websocket v1.8.15
+	golang.org/x/sys v0.35.0
 )
 
 require (
@@ -22,6 +23,5 @@ require (
 	github.com/rivo/uniseg v0.2.0 // indirect
 	github.com/rogpeppe/go-internal v1.6.1 // indirect
 	golang.org/x/net v0.43.0 // indirect
-	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/term v0.34.0 // indirect
 )
