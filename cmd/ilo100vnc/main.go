@@ -261,7 +261,6 @@ func buildConsoleConfig(cfg config, log *slog.Logger) (ilo.Config, error) {
 		IdleTimeout:   idle,
 		RelativeMouse: cfg.RelativeMouse,
 		Log:           log,
-		Debug:         cfg.Debug,
 	}, nil
 }
 

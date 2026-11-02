@@ -25,8 +25,7 @@ type Config struct {
 	// RelativeMouse uses relative instead of absolute pointer reports.
 	RelativeMouse bool
 
-	Log   *slog.Logger
-	Debug bool
+	Log *slog.Logger // at debug level, also hex dumps the iLO traffic
 }
 
 // Console owns the decoded screen and the (re)connecting iLO session, and
@@ -166,13 +165,10 @@ func (c *Console) session(ctx context.Context) error {
 		return err
 	}
 	c.log.Info("logged in", "kvm_port", p.Port, "ssl", p.SSL, "page_host", p.PageHost)
-	if c.cfg.Debug {
-		c.log.Debug("kvm token", "len", len(p.Token))
-	}
+	c.log.Debug("kvm token", "len", len(p.Token))
 	s, err := Dial(ctx, p, c.fb, SessionOptions{
 		Relative: c.cfg.RelativeMouse,
 		Log:      c.log,
-		Debug:    c.cfg.Debug,
 		OnUpdate: c.notify,
 	})
 	if err != nil {

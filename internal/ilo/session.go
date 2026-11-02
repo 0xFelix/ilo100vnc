@@ -42,9 +42,8 @@ type Session struct {
 
 // SessionOptions configure Dial.
 type SessionOptions struct {
-	Relative bool // relative instead of absolute mouse
-	Log      *slog.Logger
-	Debug    bool // hex dump all traffic
+	Relative bool         // relative instead of absolute mouse
+	Log      *slog.Logger // at debug level, also hex dumps all traffic
 	OnUpdate func(image.Rectangle)
 }
 
@@ -67,7 +66,6 @@ func Dial(ctx context.Context, p Params, fb *Framebuffer, o SessionOptions) (*Se
 	s := &Session{
 		conn:     conn,
 		log:      o.Log,
-		debug:    o.Debug,
 		fb:       fb,
 		relative: o.Relative,
 		onUpdate: o.OnUpdate,
@@ -75,6 +73,7 @@ func Dial(ctx context.Context, p Params, fb *Framebuffer, o SessionOptions) (*Se
 	if s.log == nil {
 		s.log = slog.Default()
 	}
+	s.debug = s.log.Enabled(ctx, slog.LevelDebug)
 	s.log.Info("connected to KVM port", "addr", addr)
 	if err := s.Send(EncodeClientNOP()); err != nil {
 		_ = conn.Close()
