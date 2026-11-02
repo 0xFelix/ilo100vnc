@@ -155,6 +155,33 @@ func TestConsoleEndToEnd(t *testing.T) {
 	}
 }
 
+func TestConsoleWaitsForPreviousSession(t *testing.T) {
+	logins := make(chan struct{}, 10)
+	web := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logins <- struct{}{}
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer web.Close()
+	u, _ := url.Parse(web.URL)
+	c := NewConsole(Config{URL: u, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	// a previous run that was canceled by the idle timer but has not ended
+	prev := make(chan struct{})
+	c.done = prev
+	c.Attach()
+	defer c.Close()
+	select {
+	case <-logins:
+		t.Fatal("logged in while the previous session was still running")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(prev)
+	select {
+	case <-logins:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no login after the previous session ended")
+	}
+}
+
 func TestConsoleLoginFailure(t *testing.T) {
 	f := newFakeILO(t)
 	u, _ := url.Parse(f.web.URL)

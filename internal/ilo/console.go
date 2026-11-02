@@ -97,9 +97,11 @@ func (c *Console) Attach() {
 		c.idle = nil
 	}
 	if c.cancel == nil {
+		// a session closed by the idle timer may still be shutting down
+		prev := c.done
 		ctx, cancel := context.WithCancel(context.Background())
 		c.cancel, c.done = cancel, make(chan struct{})
-		go c.run(ctx, c.done)
+		go c.run(ctx, prev, c.done)
 	}
 }
 
@@ -138,8 +140,13 @@ func (c *Console) Close() {
 	}
 }
 
-func (c *Console) run(ctx context.Context, done chan struct{}) {
+// run keeps a session open until ctx ends. It starts once the previous
+// run has ended, so that the iLO does not see two sessions of this console.
+func (c *Console) run(ctx context.Context, prev, done chan struct{}) {
 	defer close(done)
+	if prev != nil {
+		<-prev
+	}
 	backoff := time.Second
 	for ctx.Err() == nil {
 		start := time.Now()
@@ -181,7 +188,9 @@ func (c *Console) session(ctx context.Context) error {
 	c.mu.Unlock()
 	defer func() {
 		c.mu.Lock()
-		c.sess = nil
+		if c.sess == s {
+			c.sess = nil
+		}
 		c.mu.Unlock()
 		_ = s.Close()
 	}()
